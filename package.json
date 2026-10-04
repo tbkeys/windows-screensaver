@@ -1,0 +1,31 @@
+{
+  "name": "win95-3d-maze",
+  "version": "1.0.0",
+  "description": "A faithful, self-hostable WebGL recreation of the Windows 95 3D Maze screensaver",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test": "node --test test/",
+    "smoke": "node scripts/smoke.mjs"
+  },
+  "keywords": [
+    "webgl",
+    "three.js",
+    "screensaver",
+    "windows95",
+    "maze",
+    "retro"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "lil-gui": "^0.21.0",
+    "three": "^0.186.1"
+  },
+  "devDependencies": {
+    "playwright": "^1.63.0",
+    "vite": "^8.3.2"
+  }
+}
