@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>ui dev — gui.js + hud.js + win95.css</title>
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="../../src/ui/win95.css" />
+    <style>
+      /* Win95 desktop teal stands in for the maze canvas. */
+      html, body { background: #008080; }
+      #desktop { position: fixed; inset: 0 0 28px; display: flex; align-items: center; justify-content: center; }
+      #desktop span { color: #c0c0c0; font: 11px/12px "MS Sans Serif", Tahoma, Arial, sans-serif; opacity: 0.6; }
+    </style>
+  </head>
+  <body>
+    <div id="desktop"><span>(maze canvas goes here)</span></div>
+    <script type="module" src="./ui.js"></script>
+  </body>
+</html>

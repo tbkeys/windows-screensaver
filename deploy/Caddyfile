@@ -1,0 +1,51 @@
+# Caddyfile for the built site (the contents of dist/).
+#
+# From the repository root, after `npm run build`:
+#     caddy run --config deploy/Caddyfile        → http://localhost:8080
+# Replace ":8080" with a host name (e.g. maze.example.com) and Caddy obtains and
+# renews a TLS certificate by itself.
+
+:8080 {
+	root * dist
+	encode zstd gzip
+	file_server
+
+	# Vite writes hashed file names under assets/, so those are immutable; the HTML
+	# that references them must always be revalidated.
+	@immutable path /assets/*
+	header @immutable Cache-Control "public, max-age=31536000, immutable"
+	@html path / /index.html
+	header @html Cache-Control "no-cache"
+
+	header {
+		X-Content-Type-Options nosniff
+		X-Frame-Options SAMEORIGIN
+		Referrer-Policy strict-origin-when-cross-origin
+		Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=()"
+		# Same policy as deploy/nginx.conf; loosen frame-ancestors to embed the maze.
+		Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' data: blob:; media-src 'self' blob:; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'"
+		-Server
+	}
+}
+
+# --- Sub-path of an existing site -------------------------------------------
+# The build uses base './', so it also works below a prefix:
+#
+# example.com {
+# 	handle_path /maze/* {
+# 		root * /var/www/maze
+# 		encode zstd gzip
+# 		file_server
+# 	}
+# 	handle {
+# 		# … the rest of your site …
+# 	}
+# }
+
+# --- Reverse-proxy variant ---------------------------------------------------
+# Terminate TLS in Caddy and forward to the Docker image (nginx on port 8080):
+#
+# maze.example.com {
+# 	encode zstd gzip
+# 	reverse_proxy 127.0.0.1:8080
+# }

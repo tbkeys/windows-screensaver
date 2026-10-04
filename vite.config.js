@@ -10,7 +10,12 @@ export default defineConfig({
     chunkSizeWarningLimit: 1200,
     rollupOptions: {
       output: {
-        manualChunks: { three: ['three'], 'lil-gui': ['lil-gui'] },
+        // Vite 8 (rolldown) only accepts the function form of manualChunks.
+        manualChunks(id) {
+          if (id.includes('/node_modules/three/')) return 'three';
+          if (id.includes('/node_modules/lil-gui/')) return 'lil-gui';
+          return undefined;
+        },
       },
     },
   },

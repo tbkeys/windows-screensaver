@@ -1,0 +1,671 @@
+/*
+ * Global page styles + the Windows 95 theme (window chrome, taskbar, lil-gui skin).
+ *
+ * Bevel recipe (all box-shadow, no borders, so sizes stay exact):
+ *   raised  : inset -1px -1px #000, inset 1px 1px #fff, inset -2px -2px #808080, inset 2px 2px #dfdfdf
+ *   sunken  : inset  1px  1px #808080, inset -1px -1px #fff, inset 2px 2px #0a0a0a, inset -2px -2px #dfdfdf
+ *   pressed : raised with light/dark swapped
+ */
+
+:root {
+  --w95-face: #c0c0c0;
+  --w95-light: #ffffff;
+  --w95-light2: #dfdfdf;
+  --w95-shadow: #808080;
+  --w95-dark: #000000;
+  --w95-navy: #000080;
+  --w95-tooltip: #ffffe1;
+  --w95-font: "MS Sans Serif", "Microsoft Sans Serif", Tahoma, Arial, sans-serif;
+  --w95-mono: "Fixedsys", "Lucida Console", Consolas, "DejaVu Sans Mono", monospace;
+  --w95-raised: inset -1px -1px var(--w95-dark), inset 1px 1px var(--w95-light),
+    inset -2px -2px var(--w95-shadow), inset 2px 2px var(--w95-light2);
+  --w95-pressed: inset 1px 1px var(--w95-dark), inset -1px -1px var(--w95-light),
+    inset 2px 2px var(--w95-shadow), inset -2px -2px var(--w95-light2);
+  --w95-sunken: inset 1px 1px var(--w95-shadow), inset -1px -1px var(--w95-light),
+    inset 2px 2px #0a0a0a, inset -2px -2px var(--w95-light2);
+  --w95-sunken-thin: inset 1px 1px var(--w95-shadow), inset -1px -1px var(--w95-light);
+}
+
+/* ---------- page ---------- */
+
+html, body {
+  margin: 0;
+  height: 100%;
+  background: #000;
+  overflow: hidden;
+  font: 11px/12px var(--w95-font);
+  color: #000;
+}
+
+#app {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #000;
+}
+
+canvas {
+  display: block;
+  image-rendering: auto;
+}
+canvas.pixelated {
+  image-rendering: pixelated;
+}
+
+body.hide-cursor * {
+  cursor: none !important;
+}
+
+#fade-overlay {
+  position: fixed;
+  inset: 0;
+  background: #000;
+  pointer-events: none;
+  opacity: 0;
+  z-index: 900;
+}
+
+/* ---------- window chrome ---------- */
+
+.w95-window {
+  position: fixed;
+  box-sizing: border-box;
+  padding: 3px;
+  background: var(--w95-face);
+  box-shadow: var(--w95-raised);
+  color: #000;
+  font: 11px/12px var(--w95-font);
+  user-select: none;
+  -webkit-user-select: none;
+  z-index: 1000;
+}
+.w95-window.w95-hidden {
+  display: none;
+}
+.w95-window.w95-collapsed > :not(.w95-titlebar) {
+  display: none;
+}
+
+.w95-titlebar {
+  display: flex;
+  align-items: center;
+  height: 18px;
+  padding: 0 2px 0 4px;
+  background: var(--w95-navy);
+  color: #fff;
+  font-weight: bold;
+  white-space: nowrap;
+  cursor: default;
+}
+.w95-titlebar.w95-draggable {
+  cursor: move;
+}
+.w95-titlebar .w95-title {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.w95-titlebtn {
+  flex: none;
+  position: relative;
+  width: 16px;
+  height: 14px;
+  margin-left: 2px;
+  padding: 0;
+  border: 0;
+  background: var(--w95-face);
+  box-shadow: var(--w95-raised);
+  cursor: default;
+}
+.w95-titlebtn:active {
+  box-shadow: var(--w95-pressed);
+}
+.w95-titlebtn-min::before {
+  content: "";
+  position: absolute;
+  left: 4px;
+  bottom: 3px;
+  width: 6px;
+  height: 2px;
+  background: #000;
+}
+.w95-titlebtn-close::before,
+.w95-titlebtn-close::after {
+  content: "";
+  position: absolute;
+  left: 7px;
+  top: 2px;
+  width: 2px;
+  height: 9px;
+  background: #000;
+  transform: rotate(45deg);
+}
+.w95-titlebtn-close::after {
+  transform: rotate(-45deg);
+}
+.w95-titlebtn:active::before,
+.w95-titlebtn:active::after {
+  transform: translate(1px, 1px) rotate(45deg);
+}
+.w95-titlebtn-close:active::after {
+  transform: translate(1px, 1px) rotate(-45deg);
+}
+.w95-titlebtn-min:active::before {
+  transform: translate(1px, 1px);
+}
+
+.w95-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 0;
+  background: var(--w95-face);
+  box-shadow: var(--w95-raised);
+  color: #000;
+  font: 11px/12px var(--w95-font);
+  cursor: default;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.w95-button:active,
+.w95-button.w95-active {
+  box-shadow: var(--w95-pressed);
+  padding: 1px 7px 0 9px;
+}
+.w95-button:focus-visible {
+  outline: 1px dotted #000;
+  outline-offset: -4px;
+}
+
+.w95-statusbar {
+  display: flex;
+  gap: 2px;
+  margin-top: 2px;
+}
+.w95-statusbar > * {
+  flex: 1;
+  box-sizing: border-box;
+  min-height: 18px;
+  padding: 2px 4px;
+  box-shadow: var(--w95-sunken-thin);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ---------- taskbar ---------- */
+
+.w95-taskbar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  box-sizing: border-box;
+  height: 28px;
+  padding: 2px;
+  border-top: 1px solid var(--w95-light);
+  box-shadow: 0 -1px var(--w95-light2);
+  background: var(--w95-face);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font: 11px/12px var(--w95-font);
+  color: #000;
+  z-index: 1002;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.w95-taskbar.w95-hidden {
+  display: none;
+}
+.w95-start {
+  font-weight: bold;
+  padding: 0 6px 0 4px;
+  gap: 4px;
+}
+.w95-start:active,
+.w95-start.w95-active {
+  padding: 1px 5px 0 5px;
+}
+.w95-start svg {
+  display: block;
+  width: 16px;
+  height: 14px;
+}
+.w95-taskbar-sep {
+  width: 2px;
+  height: 22px;
+  box-shadow: inset 1px 0 var(--w95-shadow), inset -1px 0 var(--w95-light);
+}
+.w95-task {
+  font-weight: bold;
+  max-width: 160px;
+  justify-content: flex-start;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.w95-taskbar-spacer {
+  flex: 1;
+}
+.w95-tray {
+  display: flex;
+  align-items: center;
+  height: 22px;
+  padding: 0 8px;
+  box-shadow: var(--w95-sunken-thin);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- HUD status window ---------- */
+
+.w95-hud {
+  top: 16px;
+  left: 16px;
+  min-width: 190px;
+  z-index: 999;
+}
+.w95-stats {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 2px 10px;
+  margin: 4px 0 2px;
+  padding: 4px 6px;
+  background: #fff;
+  box-shadow: var(--w95-sunken);
+  cursor: default;
+}
+.w95-stats dt {
+  margin: 0;
+  color: #000;
+}
+.w95-stats dd {
+  margin: 0;
+  font: 11px/12px var(--w95-mono);
+  color: var(--w95-navy);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: right;
+}
+
+/* ---------- toast (tooltip style) ---------- */
+
+.w95-toast {
+  position: fixed;
+  left: 50%;
+  bottom: 44px;
+  transform: translateX(-50%);
+  max-width: min(480px, calc(100vw - 32px));
+  padding: 3px 6px;
+  border: 1px solid #000;
+  background: var(--w95-tooltip);
+  color: #000;
+  font: 11px/14px var(--w95-font);
+  white-space: pre-wrap;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 120ms linear;
+  z-index: 1003;
+}
+.w95-toast.w95-visible {
+  opacity: 1;
+}
+
+/* ---------- settings window (lil-gui host) ---------- */
+
+.w95-gui {
+  top: 16px;
+  right: 16px;
+}
+.w95-gui-body {
+  margin-top: 3px;
+}
+.w95-help {
+  padding: 4px 6px 6px;
+  line-height: 14px;
+  cursor: default;
+}
+.w95-help p {
+  margin: 0 0 4px;
+}
+.w95-help dl {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 1px 8px;
+  margin: 0;
+}
+.w95-help dt {
+  font: 11px/14px var(--w95-mono);
+  color: var(--w95-navy);
+  white-space: nowrap;
+}
+.w95-help dd {
+  margin: 0;
+}
+.w95-divider {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 5px 6px 2px;
+  color: #000;
+  cursor: default;
+}
+.w95-divider::before,
+.w95-divider::after {
+  content: "";
+  flex: 1;
+  height: 2px;
+  box-shadow: inset 0 1px var(--w95-shadow), inset 0 -1px var(--w95-light);
+}
+.w95-status-line {
+  cursor: default;
+}
+.w95-status-line .lil-widget {
+  color: var(--w95-shadow);
+  font-style: italic;
+}
+.w95-status-line.w95-loaded .lil-widget {
+  color: var(--w95-navy);
+  font-style: normal;
+}
+
+/* ---------- lil-gui skin ---------- */
+
+.lil-gui.lil-root,
+.lil-gui .lil-gui {
+  --background-color: var(--w95-face);
+  --text-color: #000;
+  --title-background-color: var(--w95-navy);
+  --title-text-color: #fff;
+  --widget-color: #fff;
+  --hover-color: #fff;
+  --focus-color: #fff;
+  --number-color: var(--w95-navy);
+  --string-color: #000;
+  --font-family: var(--w95-font);
+  --font-family-mono: var(--w95-mono);
+  --font-size: 11px;
+  --input-font-size: 11px;
+  --padding: 6px;
+  --spacing: 3px;
+  --widget-height: 20px;
+  --title-height: 18px;
+  --name-width: 42%;
+  --slider-knob-width: 2px;
+  --slider-input-width: 26%;
+  --color-input-width: 30%;
+  --folder-indent: 8px;
+  --widget-padding: 0 0 0 4px;
+  --widget-border-radius: 0;
+  --checkbox-size: 13px;
+  --scrollbar-width: 16px;
+}
+
+/* root panel: no own title (the host window has one), scrollable body.
+   100vh minus window chrome (title, status bar, bevels ≈ 50px), the 16px top
+   offset and the 28px taskbar, so the whole window stays on screen. */
+.lil-gui.lil-root {
+  background: var(--w95-face);
+}
+.lil-gui.lil-root > .lil-title {
+  display: none;
+}
+.lil-gui .lil-controller .lil-widget {
+  min-width: 0;
+}
+.lil-gui.lil-root > .lil-children {
+  max-height: calc(100vh - 100px);
+  padding-bottom: 2px;
+}
+@supports not selector(::-webkit-scrollbar) {
+  .lil-gui.lil-root > .lil-children {
+    scrollbar-width: auto;
+    scrollbar-color: var(--w95-face) var(--w95-light2);
+  }
+}
+.lil-gui.lil-root > .lil-children::-webkit-scrollbar {
+  background: repeating-conic-gradient(var(--w95-face) 0 25%, var(--w95-light) 0 50%) 0 0 / 2px 2px;
+}
+.lil-gui.lil-root > .lil-children::-webkit-scrollbar-thumb {
+  border-radius: 0;
+  background: var(--w95-face);
+  box-shadow: var(--w95-raised);
+}
+.lil-gui.lil-root > .lil-children::-webkit-scrollbar-button:single-button {
+  display: block;
+  height: 16px;
+  background: var(--w95-face) center no-repeat;
+  box-shadow: var(--w95-raised);
+}
+.lil-gui.lil-root > .lil-children::-webkit-scrollbar-button:single-button:vertical:decrement {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16'%3E%3Cpath d='M4.5 10h7L8 6z'/%3E%3C/svg%3E");
+}
+.lil-gui.lil-root > .lil-children::-webkit-scrollbar-button:single-button:vertical:increment {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16'%3E%3Cpath d='M4.5 6h7L8 10z'/%3E%3C/svg%3E");
+}
+
+/* folder title bars: navy strip with a tree-view [+]/[-] box */
+.lil-gui .lil-gui > .lil-title {
+  background: var(--w95-navy);
+  color: #fff;
+  font-weight: bold;
+  line-height: 18px;
+  border: 0;
+}
+.lil-gui.lil-root > .lil-children > .lil-gui > .lil-title {
+  border: 0;
+  margin-top: 2px;
+}
+.lil-gui .lil-gui .lil-gui > .lil-title {
+  background: var(--w95-shadow);
+  margin-top: 1px;
+}
+.lil-gui .lil-title::before {
+  content: "−";
+  display: inline-block;
+  box-sizing: border-box;
+  width: 9px;
+  height: 9px;
+  margin-right: 5px;
+  border: 1px solid #808080;
+  background: #fff;
+  color: #000;
+  font: bold 9px/7px var(--w95-mono);
+  text-align: center;
+  vertical-align: 0;
+  padding: 0;
+}
+.lil-gui.lil-closed > .lil-title::before {
+  content: "+";
+}
+.lil-gui .lil-title:focus-visible {
+  outline: 1px dotted #fff;
+  outline-offset: -3px;
+}
+.lil-gui .lil-gui .lil-gui > .lil-children {
+  border-left: 1px solid var(--w95-shadow);
+  box-shadow: inset 1px 0 var(--w95-light);
+}
+.lil-gui + .lil-controller {
+  border-top: 0;
+  margin-top: var(--spacing);
+  padding-top: 0;
+}
+
+/* text + number inputs: sunken white boxes, black text */
+.lil-gui input {
+  border-radius: 0;
+  background: #fff;
+  color: #000;
+  box-shadow: var(--w95-sunken);
+}
+.lil-gui input[type=text],
+.lil-gui input[type=number] {
+  padding: 0 3px 0 4px;
+}
+.lil-gui input[type=text]:focus,
+.lil-gui input[type=number]:focus {
+  background: #fff;
+}
+.lil-gui .lil-controller.lil-number input,
+.lil-gui .lil-controller.lil-string input {
+  color: #000;
+}
+
+/* checkboxes */
+.lil-gui input[type=checkbox] {
+  border-radius: 0;
+  background: #fff;
+  box-shadow: var(--w95-sunken);
+  color: #000;
+}
+.lil-gui input[type=checkbox]:checked::before {
+  color: #000;
+  font-size: 11px;
+  line-height: 13px;
+}
+.lil-gui input[type=checkbox]:focus-visible {
+  box-shadow: var(--w95-sunken);
+  outline: 1px dotted #000;
+  outline-offset: 1px;
+}
+
+/* sliders: sunken channel with a navy fill (Win95 progress-bar look) */
+.lil-gui .lil-controller.lil-number .lil-slider {
+  border-radius: 0;
+  background: #fff;
+  box-shadow: var(--w95-sunken);
+  padding: 2px calc(2px + var(--slider-knob-width)) 2px 2px;
+}
+.lil-gui .lil-controller.lil-number .lil-slider .lil-fill {
+  background: var(--w95-navy);
+  border-right-color: var(--w95-navy);
+}
+
+/* dropdowns: white sunken field with a bevelled arrow button */
+.lil-gui .lil-controller.lil-option .lil-display {
+  border-radius: 0;
+  background: #fff;
+  box-shadow: var(--w95-sunken);
+  padding-left: 5px;
+  padding-right: 22px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  word-break: normal;
+}
+.lil-gui .lil-controller.lil-option .lil-display::after {
+  content: "▼";
+  font: 7px/16px var(--w95-font);
+  width: 16px;
+  top: 2px;
+  right: 2px;
+  bottom: 2px;
+  padding: 0;
+  text-align: center;
+  background: var(--w95-face);
+  box-shadow: var(--w95-raised);
+  color: #000;
+}
+.lil-gui .lil-controller.lil-option .lil-display.lil-focus,
+.lil-gui .lil-controller.lil-option .lil-display.lil-active {
+  background: #fff;
+  outline: 1px dotted #000;
+  outline-offset: -4px;
+}
+
+/* colour swatches */
+.lil-gui .lil-controller.lil-color .lil-display {
+  border-radius: 0;
+  box-shadow: var(--w95-sunken);
+}
+
+/* buttons */
+.lil-gui .lil-controller button {
+  border-radius: 0;
+  background: var(--w95-face);
+  box-shadow: var(--w95-raised);
+  color: #000;
+  cursor: default;
+}
+.lil-gui .lil-controller button:hover {
+  background: var(--w95-face);
+}
+.lil-gui .lil-controller button:active {
+  background: var(--w95-face);
+  box-shadow: var(--w95-pressed);
+  padding-top: 1px;
+}
+.lil-gui .lil-controller button:focus-visible {
+  box-shadow: var(--w95-raised);
+  outline: 1px dotted #000;
+  outline-offset: -4px;
+}
+
+.lil-gui .lil-controller.lil-disabled {
+  opacity: 1;
+  color: var(--w95-shadow);
+  text-shadow: 1px 1px #fff;
+}
+
+/* ---------- small screens ---------- */
+
+@media (max-width: 600px) {
+  .w95-window.w95-gui {
+    top: auto;
+    right: 0;
+    bottom: 28px;
+    left: 0;
+    width: 100% !important;
+  }
+  .w95-gui .lil-gui.lil-root {
+    width: 100%;
+  }
+  .w95-gui .lil-gui.lil-root > .lil-children {
+    max-height: 55vh;
+  }
+  .w95-hud {
+    top: 8px;
+    left: 8px;
+  }
+  .w95-task {
+    display: none;
+  }
+}
+
+/* ---------- message box (WebGL unavailable) ---------- */
+
+.w95-dialog {
+  left: 50%;
+  top: 40%;
+  width: min(380px, calc(100vw - 32px));
+  transform: translate(-50%, -50%);
+}
+.w95-dialog .w95-body {
+  padding: 12px 12px 10px;
+}
+.w95-dialog p {
+  margin: 0 0 8px;
+  line-height: 14px;
+}
+.w95-dialog .w95-dialog-detail {
+  font: 11px/13px var(--w95-mono);
+  color: var(--w95-shadow);
+  word-break: break-word;
+}
+.w95-dialog-buttons {
+  display: flex;
+  justify-content: center;
+  margin-top: 4px;
+}
+.w95-dialog-buttons .w95-button {
+  min-width: 75px;
+}

@@ -1,0 +1,15 @@
+# docker compose up --build -d   → http://localhost:8080
+services:
+  maze:
+    build: .
+    image: win95-3d-maze:latest
+    container_name: win95-3d-maze
+    ports:
+      - "8080:8080"
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    # Optional hardening: the image only ever writes under /tmp (pid + temp files).
+    # read_only: true
+    # tmpfs:
+    #   - /tmp

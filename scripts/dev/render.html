@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>render dev — materials, mazeMesh, lighting, post</title>
+    <link rel="icon" href="data:," />
+    <style>
+      html, body { margin: 0; background: #202020; color: #ddd; font: 12px/1.3 system-ui, sans-serif; }
+      #gl { display: block; width: 960px; height: 720px; }
+      #status { padding: 6px 10px; white-space: pre; color: #9c9c9c; }
+      #controls { padding: 0 10px 10px; }
+      button { font: inherit; margin-right: 6px; }
+    </style>
+  </head>
+  <body>
+    <canvas id="gl" width="960" height="720"></canvas>
+    <div id="controls">
+      <button data-mode="classic">classic</button>
+      <button data-mode="lit">lit + headlamp + fog</button>
+      <button data-mode="post">post effects</button>
+    </div>
+    <div id="status">starting…</div>
+    <script type="module" src="./render.js"></script>
+  </body>
+</html>
