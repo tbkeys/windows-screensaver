@@ -7,8 +7,8 @@
  * `finished` is false while a slider / colour / text field is still being edited and
  * true exactly once per committed change (checkboxes and dropdowns only send `true`).
  */
-import GUI, { ColorController, NumberController, StringController } from 'lil-gui';
-import { DEFAULTS, ENUMS } from '../config/defaults.js';
+import GUI, { ColorController, NumberController } from 'lil-gui';
+import { DEFAULTS, ENUMS, ENUM_FIELDS, RANGES, isPlainObject } from '../config/defaults.js';
 import { createWin95Window, makeDraggable } from './hud.js';
 
 const STORAGE_KEY = 'win95maze.guiPos';
@@ -46,126 +46,39 @@ const range = (min, max, step) => ({ min, max, step });
 const pick = (enumName) => ({ options: enumOptions(ENUMS[enumName]) });
 const COLOR = { color: true };
 
-const slotSpecs = (slot) => ({
-  [`textures.${slot}.kind`]: pick(slot === 'poster' ? 'posterTextures' : 'surfaceTextures'),
+const SLOT_COLORS = Object.fromEntries(TEXTURE_SLOTS.map((slot) => [`textures.${slot}.tint`, COLOR]));
+const slotRanges = (slot) => ({
   [`textures.${slot}.repeatU`]: range(0.1, 8, 0.05),
   [`textures.${slot}.repeatV`]: range(0.1, 8, 0.05),
   [`textures.${slot}.offsetU`]: range(-1, 1, 0.01),
   [`textures.${slot}.offsetV`]: range(-1, 1, 0.01),
-  [`textures.${slot}.tint`]: COLOR,
   [`textures.${slot}.brightness`]: range(0, 3, 0.01),
 });
 
-/** Per-path widget hints; leaves without an entry fall back to lil-gui's type detection. */
+/**
+ * Per-path widget hints. Sliders come from `RANGES` and dropdowns from `ENUM_FIELDS` (both in
+ * defaults.js, shared with the settings sanitiser); only colour pickers and a few bespoke
+ * widgets are listed here. Leaves without an entry fall back to lil-gui's type detection.
+ */
 const SPECS = {
-  'maze.width': range(2, 80, 1),
-  'maze.height': range(2, 80, 1),
-  'maze.algorithm': pick('mazeAlgorithms'),
-  'maze.braid': range(0, 1, 0.01),
-  'maze.growingTreeMix': range(0, 1, 0.01),
-  'maze.roomChance': range(0, 1, 0.01),
-  'maze.startPlacement': pick('startPlacements'),
-  'maze.finishPlacement': pick('finishPlacements'),
-  'maze.cellSize': range(0.25, 4, 0.05),
-  'maze.wallHeight': range(0.25, 4, 0.05),
-
-  'movement.strategy': pick('strategies'),
-  'movement.stepDuration': range(0.05, 3, 0.01),
-  'movement.turnDuration': range(0.05, 3, 0.01),
-  'movement.stepEasing': pick('easings'),
-  'movement.turnEasing': pick('easings'),
-  'movement.pauseBeforeTurn': range(0, 3, 0.05),
-  'movement.pauseAfterTurn': range(0, 3, 0.05),
-  'movement.pauseAtDeadEnd': range(0, 3, 0.05),
-  'movement.quantize': range(0, 32, 1),
-  'movement.headBob': range(0, 0.2, 0.005),
-  'movement.headBobSpeed': range(0, 10, 0.1),
-
-  'camera.fov': range(30, 140, 1),
-  'camera.height': range(0.05, 0.95, 0.01),
-  'camera.pitch': range(-45, 45, 1),
-  'camera.near': range(0.01, 1, 0.01),
-  'camera.far': range(10, 500, 1),
-  'camera.aspectMode': pick('aspectModes'),
-  'camera.renderScale': range(0.1, 2, 0.05),
-
-  'timing.fpsCap': range(0, 240, 1),
-  'timing.tickRate': range(5, 240, 1),
-  'timing.timeScale': range(0, 4, 0.05),
-
-  ...slotSpecs('wall'),
-  ...slotSpecs('floor'),
-  ...slotSpecs('ceiling'),
-  ...slotSpecs('poster'),
-  'textures.filtering': pick('filtering'),
-  'textures.anisotropy': range(1, 16, 1),
+  ...Object.fromEntries(Object.entries(RANGES).map(([path, [min, max, step]]) => [path, range(min, max, step)])),
+  ...Object.fromEntries(Object.entries(ENUM_FIELDS).map(([path, enumName]) => [path, pick(enumName)])),
+  ...slotRanges('wall'),
+  ...slotRanges('floor'),
+  ...slotRanges('ceiling'),
+  ...slotRanges('poster'),
+  ...SLOT_COLORS,
   'textures.resolution': { options: enumOptions(ENUMS.textureResolutions.map((n) => [n, `${n} × ${n}`])) },
   'textures.textureSeed': { min: 0, step: 1 },
-
-  'lighting.mode': pick('lightingModes'),
   'lighting.ambientColor': COLOR,
-  'lighting.ambientIntensity': range(0, 3, 0.01),
   'lighting.hemisphereSky': COLOR,
   'lighting.hemisphereGround': COLOR,
-  'lighting.hemisphereIntensity': range(0, 3, 0.01),
   'lighting.sunColor': COLOR,
-  'lighting.sunIntensity': range(0, 3, 0.01),
-  'lighting.sunElevation': range(0, 90, 1),
-  'lighting.sunAzimuth': range(0, 360, 1),
   'lighting.headlampColor': COLOR,
-  'lighting.headlampIntensity': range(0, 10, 0.1),
-  'lighting.headlampDistance': range(0, 30, 0.1),
-  'lighting.headlampDecay': range(0, 4, 0.05),
-  'lighting.faceShading': range(0, 1, 0.01),
-  'lighting.floorShade': range(0, 1, 0.01),
-  'lighting.ceilingShade': range(0, 1, 0.01),
-  'lighting.fogType': pick('fogTypes'),
   'lighting.fogColor': COLOR,
-  'lighting.fogNear': range(0, 50, 0.1),
-  'lighting.fogFar': range(0.5, 100, 0.5),
-  'lighting.fogDensity': range(0, 0.5, 0.005),
   'lighting.backgroundColor': COLOR,
-
-  'objects.polyhedra.count': range(0, 40, 1),
-  'objects.polyhedra.shape': pick('polyhedronShapes'),
-  'objects.polyhedra.size': range(0.05, 0.9, 0.01),
   'objects.polyhedra.color': COLOR,
-  'objects.polyhedra.spinSpeed': range(0, 5, 0.05),
-  'objects.polyhedra.bob': range(0, 0.3, 0.005),
-  'objects.polyhedra.placement': pick('placements'),
-  'objects.smiley.count': range(0, 40, 1),
-  'objects.smiley.size': range(0.05, 0.9, 0.01),
-  'objects.smiley.spinSpeed': range(0, 5, 0.05),
-  'objects.smiley.bob': range(0, 0.3, 0.005),
-  'objects.smiley.flipDuration': range(0.1, 5, 0.05),
-  'objects.smiley.placement': pick('placements'),
-  'objects.rat.count': range(0, 40, 1),
-  'objects.rat.speed': range(0.1, 10, 0.1),
   'objects.rat.color': COLOR,
-  'objects.rat.size': range(0.1, 3, 0.05),
-  'objects.rat.strategy': pick('strategies'),
-  'objects.posters.randomCount': range(0, 40, 1),
-  'objects.posters.size': range(0.05, 0.9, 0.01),
-  'objects.posters.elevation': range(0.05, 0.95, 0.01),
-  'objects.finish.transition': pick('finishTransitions'),
-  'objects.finish.duration': range(0, 6, 0.05),
-  'objects.finish.pauseBefore': range(0, 3, 0.05),
-
-  'effects.colorDepth': pick('colorDepths'),
-  'effects.ditherStrength': range(0, 2, 0.01),
-  'effects.scanlines': range(0, 1, 0.01),
-  'effects.scanlineDensity': range(0.25, 4, 0.05),
-  'effects.vignette': range(0, 1, 0.01),
-  'effects.curvature': range(0, 1, 0.01),
-  'effects.pixelate': range(1, 16, 1),
-  'effects.brightness': range(0, 2, 0.01),
-  'effects.contrast': range(0, 2, 0.01),
-  'effects.saturation': range(0, 2, 0.01),
-  'effects.gamma': range(0.5, 2.5, 0.01),
-  'effects.noise': range(0, 1, 0.01),
-
-  'screensaver.hideCursorAfter': range(0, 60, 0.5),
-  'screensaver.idleStart': range(0, 600, 5),
 };
 
 /** Label overrides (full path); everything else is `humanize(key)`. */
@@ -175,10 +88,13 @@ const LABELS = {
   'movement.pauseBeforeTurn': 'Pause before turn (s)',
   'movement.pauseAfterTurn': 'Pause after turn (s)',
   'movement.pauseAtDeadEnd': 'Pause at dead end (s)',
+  'movement.pauseAtStart': 'Pause at start (s)',
+  'maze.ceiling': 'Draw ceiling',
+  'textures.anisotropy': 'Anisotropy (mipmapped)',
   'movement.quantize': 'Quantize (0 = off)',
   'movement.manual': 'Manual drive (WASD)',
   'camera.fov': 'FOV (°)',
-  'camera.height': 'Eye height',
+  'camera.height': 'Eye height (of wall)',
   'camera.pitch': 'Pitch (°)',
   'camera.near': 'Near plane',
   'camera.far': 'Far plane',
@@ -221,8 +137,6 @@ const DIVIDERS = {
   'lighting.fogEnabled': 'Fog',
   'textures.filtering': 'All surfaces',
 };
-
-const isPlainObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
 
 /** 'fogColor' → 'Fog colour' (British spelling to match the ENUMS labels). */
 const humanize = (key) => {
@@ -279,6 +193,8 @@ const buildHelp = (folder) => {
  */
 export function createGui(config, { onChange = () => {}, actions = {}, container = document.body } = {}) {
   const win = createWin95Window({ title: '3D Maze Setup', className: 'w95-gui', onClose: () => closeFromUser() });
+  // On a phone the panel would cover most of the maze: start it rolled up to its title bar.
+  if (window.matchMedia?.('(max-width: 600px)').matches) win.setCollapsed(true);
   const host = document.createElement('div');
   host.className = 'w95-gui-body';
   win.body.appendChild(host);
@@ -311,10 +227,8 @@ export function createGui(config, { onChange = () => {}, actions = {}, container
     folder.add({ [label]: () => run(action, ...args) }, label);
 
   const wire = (controller, path) => {
-    const continuous =
-      controller instanceof NumberController ||
-      controller instanceof ColorController ||
-      controller instanceof StringController;
+    // Sliders and colour pickers report every drag step; text fields (the seed) only commit.
+    const continuous = controller instanceof NumberController || controller instanceof ColorController;
     if (continuous) controller.onChange((v) => onChange(path, v, false));
     controller.onFinishChange((v) => onChange(path, v, true));
     return controller;

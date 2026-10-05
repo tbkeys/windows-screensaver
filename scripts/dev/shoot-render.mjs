@@ -1,12 +1,9 @@
 // Headless screenshots of scripts/dev/render.html → scripts/out/render-{classic,lit,post}.png
 // usage: node scripts/dev/shoot-render.mjs [port]
-import { chromium } from 'playwright';
+import { launchChromium } from '../lib/chromium.mjs';
 
 const port = process.argv[2] || '5187';
-const browser = await chromium.launch({
-  executablePath: '/opt/pw-browsers/chromium',
-  args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'],
-});
+const browser = await launchChromium();
 const page = await browser.newPage({ viewport: { width: 980, height: 1060 }, deviceScaleFactor: 1 });
 const problems = [];
 page.on('console', (m) => {

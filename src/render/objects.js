@@ -33,12 +33,23 @@ const POLY_SPIN = 1.5;
 const SMILEY_SPIN = 2.0;
 /** Bob oscillation (rad/s) shared by every floating object. */
 const BOB_RATE = 2.2;
-/** Flat-shading model for unlit polyhedra: ambient + key light + weak fill, in object space. */
-const FACET_AMBIENT = 0.45;
-const FACET_KEY = new THREE.Vector3(0.45, 0.8, 0.4).normalize();
-const FACET_KEY_STRENGTH = 0.55;
-const FACET_FILL = new THREE.Vector3(-0.5, -0.2, -0.8).normalize();
-const FACET_FILL_STRENGTH = 0.18;
+/**
+ * Flat-shading model for unlit (classic-mode) polyhedra: ambient + key light + weak fill,
+ * evaluated from the WORLD-space normal inside MeshBasicMaterial, so facets brighten and
+ * darken as a solid tumbles – the cue that made the original's GL-lit shapes read as 3D.
+ */
+const FACET_GLSL = Object.freeze({
+  declare: 'varying float vFacet;',
+  vertex: `
+    vec3 facetNormal = normalize(mat3(modelMatrix) * normal);
+    float facetKey = max(0.0, dot(facetNormal, normalize(vec3(0.45, 0.8, 0.4)))) * 0.55;
+    float facetFill = max(0.0, dot(facetNormal, normalize(vec3(-0.5, -0.2, -0.8)))) * 0.18;
+    vFacet = min(1.0, 0.45 + facetKey + facetFill);`,
+  fragment: 'diffuseColor.rgb *= vFacet;',
+});
+
+/** Eye level in world units: `camera.height` is a fraction of the wall height. */
+export const eyeHeight = (config) => config.camera.height * config.maze.wallHeight;
 /** Cube with a circumscribed radius of 1, like the other unit polyhedra. */
 const CUBE_SIDE = 2 / Math.sqrt(3);
 
@@ -129,24 +140,27 @@ function prefers(placement, openings) {
 }
 
 /**
- * Pick `count` distinct cells not in `used` (a Set of cell indices), preferring cells that
- * match `placement` and falling back to the rest. Marks the picks as used.
+ * Pick `count` distinct cells, preferring cells that match `placement` and falling back to
+ * the rest. `reserved` (cell indices) are never candidates; `taken` are skipped but do not
+ * change the shuffled candidate order, so one decoration type's picks stay put when another
+ * type's settings change (only a direct collision moves a pick). Adds the picks to `taken`.
  */
-function chooseCells(maze, rng, count, placement, used) {
+function chooseCells(maze, rng, count, placement, reserved, taken = reserved) {
   const out = [];
   if (count <= 0) return out;
   const preferred = [];
   const fallback = [];
   for (let i = 0; i < maze.cells.length; i++) {
-    if (used.has(i)) continue;
+    if (reserved.has(i)) continue;
     const { x, y } = cellOf(maze, i);
     (prefers(placement, maze.openDirs(x, y).length) ? preferred : fallback).push(i);
   }
   rng.shuffle(preferred);
-  const picks = preferred.slice(0, count);
-  if (picks.length < count) picks.push(...rng.shuffle(fallback).slice(0, count - picks.length));
-  for (const i of picks) {
-    used.add(i);
+  rng.shuffle(fallback);
+  for (const i of [...preferred, ...fallback]) {
+    if (out.length === count) break;
+    if (taken.has(i)) continue;
+    taken.add(i);
     out.push(cellOf(maze, i));
   }
   return out;
@@ -175,17 +189,18 @@ function resolveShape(shape, rng) {
  */
 export function placeDecorations(maze, config, rng) {
   const O = config.objects;
-  const used = new Set([maze.index(maze.start.x, maze.start.y), maze.index(maze.finish.x, maze.finish.y)]);
+  const reserved = new Set([maze.index(maze.start.x, maze.start.y), maze.index(maze.finish.x, maze.finish.y)]);
+  const taken = new Set(reserved);
 
   const posters = placePosters(maze, O.posters, rng.fork('posters'));
 
   const polyRng = rng.fork('polyhedra');
   const polyCount = O.polyhedra.enabled ? toCount(O.polyhedra.count) : 0;
-  const polyhedra = chooseCells(maze, polyRng, polyCount, O.polyhedra.placement, used)
+  const polyhedra = chooseCells(maze, polyRng, polyCount, O.polyhedra.placement, reserved, taken)
     .map(({ x, y }) => ({ x, y, shape: resolveShape(O.polyhedra.shape, polyRng) }));
 
   const smileyCount = O.smiley.enabled ? toCount(O.smiley.count) : 0;
-  const smileys = chooseCells(maze, rng.fork('smileys'), smileyCount, O.smiley.placement, used);
+  const smileys = chooseCells(maze, rng.fork('smileys'), smileyCount, O.smiley.placement, reserved, taken);
 
   return { posters, polyhedra, smileys };
 }
@@ -226,29 +241,9 @@ export function teleportTarget(maze, rng, exclude = []) {
 
 /* ============================================================ geometry kit */
 
-/** Grey level for a surface normal under the fixed object-space lights (unlit polyhedra). */
-function facetShade(normal) {
-  const key = Math.max(0, normal.dot(FACET_KEY)) * FACET_KEY_STRENGTH;
-  const fill = Math.max(0, normal.dot(FACET_FILL)) * FACET_FILL_STRENGTH;
-  return Math.min(1, FACET_AMBIENT + key + fill);
-}
-
-/** Per-vertex grey from the geometry's normals (face normals ⇒ one shade per facet). */
-function shadeByNormal(geometry) {
-  const normal = geometry.attributes.normal;
-  const color = new Float32Array(normal.count * 3);
-  const n = new THREE.Vector3();
-  for (let i = 0; i < normal.count; i++) {
-    const shade = facetShade(n.fromBufferAttribute(normal, i));
-    color[i * 3] = color[i * 3 + 1] = color[i * 3 + 2] = shade;
-  }
-  return new THREE.BufferAttribute(color, 3);
-}
-
 /**
- * Unit-radius polyhedron with a baked `color` attribute. `flat` keeps one normal/shade per
- * face; otherwise vertices are merged and normals averaged so Lambert and the baked greys
- * both read as smooth.
+ * Unit-radius polyhedron. `flat` keeps one normal per face (faceted look); otherwise
+ * vertices are merged and normals averaged so both Lambert and the facet shader read smooth.
  */
 function buildShapeGeometry(shape, flat) {
   const base = SHAPE_FACTORIES[shape]();
@@ -262,14 +257,24 @@ function buildShapeGeometry(shape, flat) {
     geometry = merged;
     geometry.computeVertexNormals();
   }
-  geometry.setAttribute('color', shadeByNormal(geometry));
   return geometry;
 }
 
+/** Lambert in lit mode; in classic mode a MeshBasicMaterial with the world-space facet shader. */
 function createPolyhedronMaterial(mode, P) {
   const color = new THREE.Color(P.color);
   if (mode === 'lit') return new THREE.MeshLambertMaterial({ color, flatShading: !!P.flatShading, wireframe: !!P.wireframe });
-  return new THREE.MeshBasicMaterial({ color, vertexColors: true, wireframe: !!P.wireframe });
+  const material = new THREE.MeshBasicMaterial({ color, wireframe: !!P.wireframe });
+  material.onBeforeCompile = (shader) => {
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', `#include <common>\n${FACET_GLSL.declare}`)
+      .replace('#include <begin_vertex>', `#include <begin_vertex>\n${FACET_GLSL.vertex}`);
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', `#include <common>\n${FACET_GLSL.declare}`)
+      .replace('#include <color_fragment>', `#include <color_fragment>\n${FACET_GLSL.fragment}`);
+  };
+  material.customProgramCacheKey = () => 'facet-shaded-basic';
+  return material;
 }
 
 /** Yellow smiley on a square canvas; the disc geometry's UVs map onto the inscribed circle. */
@@ -366,7 +371,7 @@ export class DecorationLayer {
 
   _buildPolyhedra(list) {
     const cs = this.config.maze.cellSize;
-    const baseY = this.config.maze.wallHeight * 0.5;
+    const baseY = eyeHeight(this.config);
     list.forEach(({ x, y, shape }, i) => {
       const mesh = new THREE.Mesh(this._geometryFor(shape, this._polyFlat), this._polyMaterial);
       mesh.name = `polyhedron:${shape}`;
@@ -394,7 +399,7 @@ export class DecorationLayer {
     list.forEach(({ x, y }, i) => {
       const mesh = new THREE.Mesh(this._circle, this._smileyMaterial);
       mesh.name = 'smiley';
-      mesh.position.set((x + 0.5) * cs, this.config.camera.height, (y + 0.5) * cs);
+      mesh.position.set((x + 0.5) * cs, eyeHeight(this.config), (y + 0.5) * cs);
       const entry = { type: 'smiley', mesh, index: i, rate: i % 2 ? -1 : 1, angle: i * 2.1, phase: i * 2.6 };
       this._smileys.push(entry);
       this._byCell.set(this.maze.index(x, y), entry);
@@ -439,17 +444,16 @@ export class DecorationLayer {
     this._syncPolyhedronStyle();
     const { polyhedra: P, smiley: S } = this.config.objects;
 
-    const polyY = this.config.maze.wallHeight * 0.5;
+    const eyeY = eyeHeight(this.config);
     const polySize = Math.max(0, P.size);
     const polySpin = P.spinSpeed * POLY_SPIN;
     for (const e of this._polyhedra) {
       e.angle = wrapAngle(e.angle + polySpin * e.rate * dt);
       e.mesh.quaternion.setFromAxisAngle(e.axis, e.angle);
-      e.mesh.position.y = polyY + P.bob * Math.sin(time * BOB_RATE + e.phase);
+      e.mesh.position.y = eyeY + P.bob * Math.sin(time * BOB_RATE + e.phase);
       e.mesh.scale.setScalar(polySize);
     }
 
-    const eyeY = this.config.camera.height;
     const smileySize = Math.max(0, S.size);
     const smileySpin = S.spinSpeed * SMILEY_SPIN;
     for (const e of this._smileys) {
@@ -531,10 +535,25 @@ const RAT_PARTS = Object.freeze({
   nose: { scale: [0.012, 0.012, 0.012], at: [0, 0.08, -0.205] },
   eye: { scale: [0.011, 0.011, 0.011], at: [0.027, 0.105, -0.13] },
   ear: { scale: [0.026, 0.028, 0.008], at: [0.032, 0.125, -0.09], splay: 0.5 },
-  leg: { radiusTop: 0.011, radiusBottom: 0.014, length: 0.05, hipY: 0.06, x: 0.045, frontZ: -0.06, backZ: 0.06 },
+  leg: { radiusTop: 0.011, radiusBottom: 0.014, length: 0.05, hipY: 0.05, x: 0.045, frontZ: -0.06, backZ: 0.06 },
   tail: { at: [0, 0.08, 0.1], radius: 0.011, tipRadius: 0.004, segments: 16, radial: 6,
     points: [[0, 0, -0.01], [0.015, 0.005, 0.09], [-0.01, -0.015, 0.19], [0.02, -0.05, 0.3]] },
 });
+
+/** One 64 px matcap shared by every rat (reference counted so the last rat frees it). */
+let sharedMatcap = null;
+let sharedMatcapUsers = 0;
+function acquireMatcap() {
+  if (!sharedMatcap) sharedMatcap = canvasTexture(drawMatcap(64));
+  sharedMatcapUsers++;
+  return sharedMatcap;
+}
+function releaseMatcap() {
+  if (--sharedMatcapUsers > 0 || !sharedMatcap) return;
+  sharedMatcap.dispose();
+  sharedMatcap = null;
+  sharedMatcapUsers = 0;
+}
 
 /** Sphere-lit-from-the-upper-left matcap, so the rat reads as shaded even with no lights. */
 function drawMatcap(size) {
@@ -607,7 +626,7 @@ export class Rat {
     this._model.name = 'ratModel';
     this.group.add(this._model);
 
-    this._matcap = canvasTexture(drawMatcap(64));
+    this._matcap = acquireMatcap();
     this._mode = null;
     this._color = '';
     this._bodyMaterial = null;
@@ -721,18 +740,29 @@ export class Rat {
 
   /* ------------------------------------------------------------ update */
 
-  /** Advance the rat's walker by `dt` seconds and animate the model. */
+  /** `sync()` + `advance(dt)`: re-read config, move by `dt` seconds and animate the model. */
   update(dt) {
+    this.sync();
+    this.advance(dt);
+  }
+
+  /** Re-read live config (speed, strategy, colour, size, lighting mode) without moving; call every frame. */
+  sync() {
     const R = this.config.objects.rat;
     this._movement.stepDuration = 1 / Math.max(RAT_MIN_SPEED, R.speed);
     if (R.strategy !== this._strategy) {
       this._strategy = R.strategy;
       this.walker.setNavigator(createNavigator(R.strategy, this.maze, this._navRng));
     }
-    this.walker.update(dt);
     this._syncMaterials();
     this._applyPose();
-    this._animate(dt, Math.max(RAT_MIN_SPEED, R.speed));
+  }
+
+  /** Advance the rat's walker by `dt` seconds and animate legs/tail (skip while paused). */
+  advance(dt) {
+    this.walker.update(dt);
+    this._applyPose();
+    this._animate(dt, Math.max(RAT_MIN_SPEED, this.config.objects.rat.speed));
   }
 
   _applyPose() {
@@ -754,7 +784,7 @@ export class Rat {
       + Math.sin(this._clock * 1.7) * RAT_TAIL_IDLE;
   }
 
-  /** Free geometries, materials and the matcap texture, unhook the walker and detach the group. */
+  /** Free geometries and materials, release the shared matcap, unhook the walker and detach the group. */
   dispose() {
     this.walker.off('finish', this._onFinish);
     for (const g of this._geometries) g.dispose();
@@ -762,7 +792,8 @@ export class Rat {
     this._bodyMaterial?.dispose();
     this._accentMaterial?.dispose();
     this._eyeMaterial.dispose();
-    this._matcap.dispose();
+    releaseMatcap();
+    this._matcap = null;
     this._bodyMaterial = this._accentMaterial = null;
     this._bodyMeshes.length = 0;
     this._accentMeshes.length = 0;

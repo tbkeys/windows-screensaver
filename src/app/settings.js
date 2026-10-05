@@ -4,7 +4,9 @@
  * the hidden file picker / download helpers. DOM only – no three.js – and tolerant of
  * blocked storage (private mode, quota) so the app never fails to boot over it.
  */
-import { CONFIG_VERSION, DEFAULTS, ENUMS, deepClone, diffFromDefaults, forEachLeaf, getPath, setPath } from '../config/defaults.js';
+import {
+  CONFIG_VERSION, DEFAULTS, ENUM_FIELDS, RANGES, deepClone, diffFromDefaults, enumIds, forEachLeaf, getPath, isPlainObject, setPath,
+} from '../config/defaults.js';
 
 export const STORAGE_KEY = 'win95maze.settings.v1';
 export const HASH_PREFIX = '#s=';
@@ -13,9 +15,31 @@ export const MAX_PERSISTED_IMAGE_BYTES = 700 * 1024;
 /** Value of `textures.<slot>.custom` for an upload that is too large to persist. */
 export const IN_MEMORY_MARKER = 'memory';
 export const TEXTURE_SLOTS = Object.freeze(['wall', 'floor', 'ceiling', 'poster']);
+/**
+ * Session state, never persisted, shared or imported: a saved "paused" or "manual" would
+ * boot a frozen screensaver and a saved "screensaverMode" would hide every control.
+ */
+export const SESSION_PATHS = Object.freeze(['movement.paused', 'movement.manual', 'screensaver.screensaverMode']);
 
-const MAX_MAZE_SIDE = 200;
-const isPlainObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
+const MAX_SEED_LENGTH = 64;
+const HEX_COLOR = /^#[0-9a-f]{6}$/i;
+
+/** Remove `SESSION_PATHS` from a settings diff (mutating), pruning sections left empty. */
+export function stripSessionState(diff) {
+  for (const path of SESSION_PATHS) {
+    const keys = path.split('.');
+    let node = diff;
+    for (const key of keys.slice(0, -1)) node = isPlainObject(node) ? node[key] : undefined;
+    if (isPlainObject(node)) delete node[keys[keys.length - 1]];
+  }
+  for (const key of Object.keys(diff)) {
+    if (isPlainObject(diff[key]) && Object.keys(diff[key]).length === 0) delete diff[key];
+  }
+  return diff;
+}
+
+/** The diff that leaves this browser: defaults removed, session state removed. */
+const persistableDiff = (config) => stripSessionState(diffFromDefaults(config));
 
 /* ------------------------------------------------------------- base64url */
 
@@ -50,7 +74,7 @@ export function decodeShareHash(hash) {
 
 /** Diff for a share URL: uploaded images are dropped (data URLs do not belong in a URL). */
 export function shareableDiff(config) {
-  const diff = diffFromDefaults(config);
+  const diff = persistableDiff(config);
   for (const slot of TEXTURE_SLOTS) {
     const section = diff.textures?.[slot];
     if (!section || !('custom' in section)) continue;
@@ -76,7 +100,7 @@ export function loadStoredSettings() {
 /** Persist the diff from defaults (removes the entry when nothing differs). Returns success. */
 export function storeSettings(config) {
   try {
-    const diff = diffFromDefaults(config);
+    const diff = persistableDiff(config);
     if (Object.keys(diff).length) localStorage.setItem(STORAGE_KEY, JSON.stringify(diff));
     else localStorage.removeItem(STORAGE_KEY);
     return true;
@@ -104,63 +128,71 @@ export function clearStoredSettings() {
 
 /* ------------------------------------------------------------ validation */
 
-/** Config paths whose value must be an id from the named ENUMS list. */
-const ENUM_PATHS = {
-  'maze.algorithm': 'mazeAlgorithms',
-  'maze.startPlacement': 'startPlacements',
-  'maze.finishPlacement': 'finishPlacements',
-  'movement.strategy': 'strategies',
-  'movement.stepEasing': 'easings',
-  'movement.turnEasing': 'easings',
-  'camera.aspectMode': 'aspectModes',
-  'textures.filtering': 'filtering',
-  'textures.wall.kind': 'surfaceTextures',
-  'textures.floor.kind': 'surfaceTextures',
-  'textures.ceiling.kind': 'surfaceTextures',
-  'textures.poster.kind': 'posterTextures',
-  'lighting.mode': 'lightingModes',
-  'lighting.fogType': 'fogTypes',
-  'objects.polyhedra.shape': 'polyhedronShapes',
-  'objects.polyhedra.placement': 'placements',
-  'objects.smiley.placement': 'placements',
-  'objects.rat.strategy': 'strategies',
-  'objects.finish.transition': 'finishTransitions',
-  'effects.colorDepth': 'colorDepths',
-};
-
 const isDataImageUrl = (v) => typeof v === 'string' && v.startsWith('data:image/');
 
+/** Give every object node of DEFAULTS a plain-object counterpart in `config` (returns repairs). */
+function repairShape(config, defaults = DEFAULTS) {
+  let repaired = 0;
+  for (const key of Object.keys(defaults)) {
+    const def = defaults[key];
+    if (!isPlainObject(def)) continue;
+    if (!isPlainObject(config[key])) {
+      config[key] = deepClone(def);
+      repaired++;
+    } else {
+      repaired += repairShape(config[key], def);
+    }
+  }
+  return repaired;
+}
+
 /**
- * Repair a config that came from storage, a URL or an import, so the generator, navigator
- * and renderer never see a value they would throw on: unknown enum ids, non-numeric
- * numbers, absurd maze sizes and custom-texture references that cannot be restored all
- * fall back to their defaults. Returns the number of leaves repaired.
+ * Repair a config that came from storage, a URL or an import, so the generator, navigator,
+ * renderer and GUI never see a value they would throw on: missing or non-object sections,
+ * unknown enum ids, non-numeric or out-of-range numbers (clamped to `RANGES`), malformed
+ * colours, wrong types and custom-texture references that cannot be restored all fall back
+ * to their defaults. Never throws. Returns the number of leaves repaired.
  */
 export function sanitizeConfig(config) {
-  let repaired = 0;
+  let repaired = repairShape(config);
   const reset = (path) => {
     setPath(config, path, deepClone(getPath(DEFAULTS, path)));
     repaired++;
   };
 
-  for (const [path, enumName] of Object.entries(ENUM_PATHS)) {
-    const value = getPath(config, path);
-    if (!ENUMS[enumName].some(([id]) => id === value)) reset(path);
-  }
-  if (!ENUMS.textureResolutions.includes(config.textures.resolution)) reset('textures.resolution');
-
   forEachLeaf(DEFAULTS, (path, def) => {
     const value = getPath(config, path);
-    if (typeof def === 'number' && !Number.isFinite(value)) reset(path);
-    else if (typeof def === 'boolean' && typeof value !== 'boolean') reset(path);
-    else if (path === 'maze.seed' && (typeof value !== 'string' || value === '')) reset(path);
+    const enumName = ENUM_FIELDS[path];
+    if (enumName) {
+      if (!enumIds(enumName).includes(value)) reset(path);
+    } else if (typeof def === 'number') {
+      if (!Number.isFinite(value)) {
+        reset(path);
+        return;
+      }
+      const range = RANGES[path];
+      if (!range) return;
+      const [min, max, step] = range;
+      let clamped = Math.min(max, Math.max(min, value));
+      if (step === 1) clamped = Math.round(clamped);
+      if (clamped !== value) {
+        setPath(config, path, clamped);
+        repaired++;
+      }
+    } else if (typeof def === 'boolean') {
+      if (typeof value !== 'boolean') reset(path);
+    } else if (typeof def === 'string' && def.startsWith('#')) {
+      if (typeof value !== 'string' || !HEX_COLOR.test(value)) reset(path);
+    } else if (path === 'maze.seed') {
+      if (typeof value !== 'string' || value === '') reset(path);
+      else if (value.length > MAX_SEED_LENGTH) {
+        config.maze.seed = value.slice(0, MAX_SEED_LENGTH);
+        repaired++;
+      }
+    } else if (def !== null && typeof value !== typeof def) {
+      reset(path);
+    }
   });
-
-  for (const side of ['width', 'height']) {
-    const value = Math.round(config.maze[side]);
-    if (value >= 1 && value <= MAX_MAZE_SIDE) config.maze[side] = value;
-    else reset(`maze.${side}`);
-  }
 
   for (const slot of TEXTURE_SLOTS) {
     const texture = config.textures[slot];
@@ -177,7 +209,7 @@ export function sanitizeConfig(config) {
 /* --------------------------------------------------------- export/import */
 
 export function exportSettingsJson(config) {
-  return JSON.stringify({ app: 'win95-3d-maze', version: CONFIG_VERSION, settings: diffFromDefaults(config) }, null, 2);
+  return JSON.stringify({ app: 'win95-3d-maze', version: CONFIG_VERSION, settings: persistableDiff(config) }, null, 2);
 }
 
 /** Accepts the export format or a bare diff object. Throws on anything else. */

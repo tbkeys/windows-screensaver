@@ -1,7 +1,7 @@
 import { defineConfig } from 'vite';
 
-// `base: './'` makes the built site relocatable: it works from a domain root, a
-// sub-path (GitHub Pages project sites), or opened straight from the file system.
+// `base: './'` makes the built site relocatable: it works from a domain root or any
+// sub-path (GitHub Pages project sites, `location /maze/`) without a rebuild.
 export default defineConfig({
   base: './',
   build: {

@@ -218,7 +218,7 @@ function drawBricks(p, { brickA, brickB, mortar, courses = 4, perCourse = 2, spe
   forEachPixel(ctx, size, (d, i, x, y, k) => scalePixel(d, i, 0.9 + 0.14 * tone[k] + (grain() - 0.5) * speckle));
 }
 
-const RED_BRICK = { brickA: [154, 59, 36], brickB: [176, 82, 58], mortar: [200, 196, 188] };
+const RED_BRICK = { brickA: [140, 58, 40], brickB: [163, 80, 58], mortar: [200, 196, 188] };
 const GREY_BRICK = { brickA: [104, 104, 106], brickB: [142, 140, 138], mortar: [196, 196, 192], speckle: 0.1 };
 
 /** Classic ceiling: 4 × 4 pale blue-grey tiles with darker seams and fine speckles. */
@@ -484,13 +484,13 @@ function drawMetal(p) {
   }
 }
 
-/** Uploaded image stretched over the tile, or a magenta/black "missing texture" checker. */
+/** Uploaded image at its own size, or a magenta/black "missing texture" checker. */
 function drawCustom(p) {
-  const { ctx, size, customImage } = p;
+  const { ctx, size, width, height, customImage } = p;
   if (customImage) {
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = 'high';
-    ctx.drawImage(customImage, 0, 0, size, size);
+    ctx.drawImage(customImage, 0, 0, width, height);
     return;
   }
   const n = 8, s = size / n;
@@ -668,11 +668,11 @@ const DRAWERS = {
 };
 
 /** Multiply every pixel by the tint (when given) and the brightness factor. */
-function applyTintBrightness(ctx, size, tint, brightness) {
+function applyTintBrightness(ctx, width, height, tint, brightness) {
   const t = tint ?? [255, 255, 255];
   const fr = (t[0] / 255) * brightness, fg = (t[1] / 255) * brightness, fb = (t[2] / 255) * brightness;
   if (fr === 1 && fg === 1 && fb === 1) return;
-  const img = ctx.getImageData(0, 0, size, size);
+  const img = ctx.getImageData(0, 0, width, height);
   const d = img.data;
   for (let i = 0; i < d.length; i += 4) { d[i] *= fr; d[i + 1] *= fg; d[i + 2] *= fb; }
   ctx.putImageData(img, 0, 0);
@@ -700,16 +700,22 @@ export function createTexture(kind, { resolution = 256, tint = '#ffffff', bright
     drawer = DRAWERS.solid;
   }
   const size = sanitizeResolution(resolution);
+  const drawable = toDrawable(customImage);
+  // Procedural kinds are square tiles of `resolution`; an upload keeps its own aspect ratio.
+  const upload = kind === 'custom' && drawable ? drawable : null;
+  const width = upload ? (upload.naturalWidth ?? upload.width) : size;
+  const height = upload ? (upload.naturalHeight ?? upload.height) : size;
   const canvas = document.createElement('canvas');
-  canvas.width = canvas.height = size;
+  canvas.width = width;
+  canvas.height = height;
   const ctx = canvas.getContext('2d', { willReadFrequently: true });
   const p = {
-    ctx, size, px: size / 256,
+    ctx, size, width, height, px: size / 256,
     rng: createRng(`texture:${kind}:${seed}`),
-    tint: hexToRgb(tint), text, customImage: toDrawable(customImage),
+    tint: hexToRgb(tint), text, customImage: drawable,
   };
   drawer.draw(p);
-  applyTintBrightness(ctx, size, drawer.usesTint ? null : p.tint, Math.max(0, Number(brightness) || 0));
+  applyTintBrightness(ctx, width, height, drawer.usesTint ? null : p.tint, Math.max(0, Number(brightness) || 0));
 
   const texture = new THREE.CanvasTexture(canvas);
   texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
@@ -721,15 +727,18 @@ export function createTexture(kind, { resolution = 256, tint = '#ffffff', bright
 
 /**
  * Set min/mag filters: 'pixelated' = nearest, 'smooth' = flat bilinear without mipmaps
- * (the OpenGL 1.1 look), 'trilinear' = mipmapped. Returns the texture.
+ * (the OpenGL 1.1 look), 'trilinear' = mipmapped. Anisotropic filtering only exists for
+ * mipmapped textures, so an anisotropy above 1 upgrades 'smooth' to mipmapped linear
+ * filtering instead of being silently ignored by the GPU. Returns the texture.
  */
 export function applyFiltering(texture, filtering = 'smooth', anisotropy = 1) {
   if (!texture) return texture;
+  const aniso = Math.max(1, Math.round(Number(anisotropy) || 1));
   if (filtering === 'pixelated') {
     texture.magFilter = THREE.NearestFilter;
     texture.minFilter = THREE.NearestFilter;
     texture.generateMipmaps = false;
-  } else if (filtering === 'trilinear') {
+  } else if (filtering === 'trilinear' || aniso > 1) {
     texture.magFilter = THREE.LinearFilter;
     texture.minFilter = THREE.LinearMipmapLinearFilter;
     texture.generateMipmaps = true;
@@ -738,7 +747,7 @@ export function applyFiltering(texture, filtering = 'smooth', anisotropy = 1) {
     texture.minFilter = THREE.LinearFilter;
     texture.generateMipmaps = false;
   }
-  texture.anisotropy = Math.max(1, Math.round(Number(anisotropy) || 1));
+  texture.anisotropy = aniso;
   texture.needsUpdate = true;
   return texture;
 }
@@ -826,10 +835,18 @@ function imageId(img) {
  * Seed resolution: `globalTexConfig.textureSeed` when non-zero, else `extra.seed`, else the
  * cache's own seed (`setSeed`, meant to be the maze seed).
  */
+/** Kinds whose drawing does not depend on the seed (no point regenerating them per maze). */
+const SEEDLESS_KINDS = new Set(['custom', 'solid', 'win95Teal', 'checker', 'start', 'finish', 'webglBadge', 'flag', 'smileyPoster']);
+const BYTES_PER_PIXEL = 4;
+
 export class TextureCache {
-  constructor({ seed = 0, maxEntries = 32 } = {}) {
+  /**
+   * @param {{ seed?: string|number, maxBytes?: number }} [opts] `maxBytes` bounds the canvas
+   *   backing store kept for unreferenced base textures (default 48 MB).
+   */
+  constructor({ seed = 0, maxBytes = 48 * 1024 * 1024 } = {}) {
     this.seed = seed;
-    this.maxEntries = maxEntries;
+    this.maxBytes = maxBytes;
     this._base = new Map(); // key → { texture, used }
     this._slots = new Map(); // slotName → { base, texture }
     this._custom = new Map(); // slotName → THREE.Texture (decoded upload)
@@ -848,8 +865,6 @@ export class TextureCache {
     this.invalidate(slotName);
   }
 
-  getCustomImage(slotName) { return this._custom.get(slotName) ?? null; }
-
   /** Decode `src` with textureFromImage() and register it for `slotName`. */
   async loadCustomImage(slotName, src) {
     const texture = await textureFromImage(src);
@@ -857,7 +872,8 @@ export class TextureCache {
     return texture;
   }
 
-  _seedFor(globalTexConfig, extra) {
+  _seedFor(globalTexConfig, extra, kind) {
+    if (SEEDLESS_KINDS.has(kind)) return 0;
     const s = globalTexConfig.textureSeed;
     if (s !== undefined && s !== null && s !== 0 && s !== '0' && s !== '') return s;
     return extra.seed ?? this.seed ?? 0;
@@ -870,16 +886,16 @@ export class TextureCache {
       custom = extra.customImage ? imageId(extra.customImage)
         : typeof slotConfig.custom === 'string' ? fingerprint(slotConfig.custom) : null;
     }
+    // Filtering/anisotropy are sampler settings applied per slot clone, not part of the pixels.
     return JSON.stringify([
       kind, slotConfig.tint ?? '#ffffff', slotConfig.brightness ?? 1, custom, extra.text ?? null,
-      globalTexConfig.resolution ?? 256, globalTexConfig.filtering ?? 'smooth', globalTexConfig.anisotropy ?? 1,
-      this._seedFor(globalTexConfig, extra),
+      globalTexConfig.resolution ?? 256, this._seedFor(globalTexConfig, extra, kind),
     ]);
   }
 
   /**
-   * Cached base texture for { kind, tint, brightness, custom } × { resolution, filtering,
-   * anisotropy, textureSeed }. Do not set repeat/offset on it – use getForSlot().
+   * Cached base texture for { kind, tint, brightness, custom } × { resolution, textureSeed }.
+   * Do not set repeat/offset on it – use getForSlot().
    * `extra`: { seed, text, customImage: THREE.Texture } (customImage is required for 'custom').
    */
   get(slotConfig, globalTexConfig = {}, extra = {}) {
@@ -890,7 +906,7 @@ export class TextureCache {
         resolution: globalTexConfig.resolution ?? 256,
         tint: slotConfig.tint ?? '#ffffff',
         brightness: slotConfig.brightness ?? 1,
-        seed: this._seedFor(globalTexConfig, extra),
+        seed: this._seedFor(globalTexConfig, extra, slotConfig.kind),
         text: extra.text,
         customImage: extra.customImage ?? null,
       });
@@ -904,8 +920,9 @@ export class TextureCache {
   }
 
   /**
-   * Per-slot clone of the base texture (shares the image / GPU upload) with
-   * repeat/offset from slotConfig applied. The same clone is returned until the base changes.
+   * Per-slot clone of the base texture (shares the image) with repeat/offset and the
+   * current filtering/anisotropy applied. The same clone is returned until the base changes,
+   * so toggling the filter mode re-uploads the texture but never repaints the canvas.
    */
   getForSlot(slotName, slotConfig, globalTexConfig = {}, extra = {}) {
     const merged = { customImage: this._custom.get(slotName) ?? null, ...extra };
@@ -913,8 +930,15 @@ export class TextureCache {
     let slot = this._slots.get(slotName);
     if (!slot || slot.base !== base) {
       if (slot) slot.texture.dispose();
-      slot = { base, texture: base.clone() };
+      slot = { base, texture: base.clone(), filtering: null, anisotropy: null };
       this._slots.set(slotName, slot);
+    }
+    const filtering = globalTexConfig.filtering ?? 'smooth';
+    const anisotropy = globalTexConfig.anisotropy ?? 1;
+    if (slot.filtering !== filtering || slot.anisotropy !== anisotropy) {
+      applyFiltering(slot.texture, filtering, anisotropy);
+      slot.filtering = filtering;
+      slot.anisotropy = anisotropy;
     }
     slot.texture.repeat.set(slotConfig.repeatU ?? 1, slotConfig.repeatV ?? 1);
     slot.texture.offset.set(slotConfig.offsetU ?? 0, slotConfig.offsetV ?? 0);
@@ -926,13 +950,23 @@ export class TextureCache {
     return false;
   }
 
+  /** Approximate canvas backing-store size of a base texture. */
+  static _bytesOf(texture) {
+    const image = texture.image;
+    return (image?.width ?? 0) * (image?.height ?? 0) * BYTES_PER_PIXEL;
+  }
+
+  /** Drop least-recently-used, unreferenced bases until the cache fits `maxBytes`. */
   _evict() {
-    if (this._base.size <= this.maxEntries) return;
+    let total = 0;
+    for (const e of this._base.values()) total += TextureCache._bytesOf(e.texture);
+    if (total <= this.maxBytes) return;
     const victims = [...this._base.entries()]
       .filter(([, e]) => !this._isReferenced(e.texture))
       .sort((a, b) => a[1].used - b[1].used);
     for (const [key, entry] of victims) {
-      if (this._base.size <= this.maxEntries) break;
+      if (total <= this.maxBytes) break;
+      total -= TextureCache._bytesOf(entry.texture);
       entry.texture.dispose();
       this._base.delete(key);
     }

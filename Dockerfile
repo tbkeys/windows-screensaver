@@ -15,7 +15,7 @@ COPY . .
 RUN npm run build
 
 # ---- 2. serve ---------------------------------------------------------------
-FROM nginx:1.27-alpine
+FROM nginx:1.28-alpine
 
 # Full nginx.conf (not a conf.d snippet): listens on 8080, pid/temp files in /tmp,
 # so the server runs as the unprivileged 'nginx' user that the base image ships.

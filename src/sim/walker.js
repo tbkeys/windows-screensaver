@@ -100,6 +100,9 @@ export class Walker {
     this.stats.turns = 0;
     this.stats.cellsVisited = 1;
     if (this.navigator && typeof this.navigator.reset === 'function') this.navigator.reset();
+    // Dwell on the START sign before the first decision (the classic opening beat).
+    const pauseAtStart = Math.max(0, this.movement.pauseAtStart || 0);
+    if (pauseAtStart > 0) this._beginWait(pauseAtStart, null);
     return this;
   }
 
@@ -213,10 +216,7 @@ export class Walker {
     return null;
   }
 
-  _canGo(dir) {
-    const d = DIRS[dir];
-    return !this.maze.hasWall(this.cell.x, this.cell.y, dir) && this.maze.inBounds(this.cell.x + d.dx, this.cell.y + d.dy);
-  }
+  _canGo(dir) { return this.maze.canStep(this.cell.x, this.cell.y, dir); }
 
   /* ------------------------------------------------------------------ phases */
 

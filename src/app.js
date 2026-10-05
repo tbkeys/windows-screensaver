@@ -24,7 +24,7 @@ import { createMaterialSet } from './render/materials.js';
 import { buildMazeGroup } from './render/mazeMesh.js';
 import { createLighting } from './render/lighting.js';
 import { PostPipeline } from './render/post.js';
-import { DecorationLayer, Rat, placeDecorations, teleportTarget } from './render/objects.js';
+import { DecorationLayer, Rat, eyeHeight, placeDecorations, teleportTarget } from './render/objects.js';
 import { createGui } from './ui/gui.js';
 import { createHud, createWin95Window } from './ui/hud.js';
 import {
@@ -36,6 +36,8 @@ import { createActivityWatcher } from './app/activity.js';
 
 const ASPECT_RATIOS = { '4:3': 4 / 3, '5:4': 5 / 4, '16:9': 16 / 9, '16:10': 16 / 10 };
 const MAX_PIXEL_RATIO = 2;
+/** Hard ceiling on rats regardless of what a config says (each one is a dozen meshes). */
+const MAX_RATS = 40;
 const DEG = Math.PI / 180;
 /** Slider drags coalesce expensive rebuilds; a committed change applies immediately. */
 const REBUILD_DEBOUNCE_MS = 150;
@@ -56,7 +58,11 @@ const labelOf = (list, id) => list.find(([key]) => key === id)?.[1] ?? String(id
 const isTypingTarget = (t) => !!t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable);
 const fileStamp = () => new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
 
-/** Config from defaults + stored diff + share hash (the hash wins, then becomes the stored state). */
+/**
+ * Config from defaults + stored diff + share hash (the hash wins). A hash-derived config is
+ * only persisted once the app has booted with it (see `createApp`), so a bad link can never
+ * leave a config in storage that the GUI cannot be built from.
+ */
 function loadConfig() {
   const config = createConfig();
   const fromHash = decodeShareHash(location.hash);
@@ -66,15 +72,15 @@ function loadConfig() {
   }
   if (fromHash) deepMerge(config, fromHash);
   sanitizeConfig(config);
-  // Never boot frozen or with every control hidden; both are session states, not settings.
+  // Session state, never a setting: do not boot frozen, in manual drive, or with every control hidden.
   config.movement.paused = false;
+  config.movement.manual = false;
   config.screensaver.screensaverMode = false;
-  if (fromHash) {
-    if (config.screensaver.persistSettings) storeSettings(config);
-    replaceUrl(location.pathname + location.search);
-  }
-  return config;
+  return { config, fromHash: !!fromHash };
 }
+
+/** Vertical FOV that shows `hfov` degrees horizontally at `aspect` (portrait screens). */
+const verticalFovForHorizontal = (hfov, aspect) => 2 * Math.atan(Math.tan(hfov * DEG / 2) / aspect) / DEG;
 
 function tryCreateRenderer(canvas) {
   try {
@@ -114,7 +120,7 @@ function showWebglError(error) {
  * @param {HTMLCanvasElement} canvas
  */
 export function createApp(canvas) {
-  const config = loadConfig();
+  const { config, fromHash } = loadConfig();
   const { renderer, error } = tryCreateRenderer(canvas);
   if (!renderer) {
     showWebglError(error);
@@ -213,6 +219,18 @@ export function createApp(canvas) {
     deepMerge(config, deepClone(DEFAULTS));
     config.maze.seed = seed;
     for (const slot of TEXTURE_SLOTS) textureCache.setCustomImage(slot, null);
+  }
+
+  /**
+   * Replace the live config with `candidate` (a complete config, e.g. `createConfig(diff)`).
+   * The candidate is validated first so a bad import never leaves the live config half-applied.
+   */
+  function replaceConfig(candidate, { seed = DEFAULTS.maze.seed } = {}) {
+    candidate.maze.seed = seed;
+    sanitizeConfig(candidate);
+    resetConfig({ seed });
+    deepMerge(config, candidate);
+    applyAll();
   }
 
   /** Re-apply everything after a wholesale config replacement (preset, import, reset). */
@@ -346,7 +364,7 @@ export function createApp(canvas) {
   function rebuildRats() {
     disposeRats();
     const R = config.objects.rat;
-    const count = R.enabled ? Math.max(0, Math.floor(R.count)) : 0;
+    const count = R.enabled ? Math.min(MAX_RATS, Math.max(0, Math.floor(R.count))) : 0;
     for (let i = 0; i < count; i++) {
       const rat = new Rat(maze, config, rng.fork(`rat${i}`));
       scene.add(rat.group);
@@ -431,17 +449,24 @@ export function createApp(canvas) {
     fadeIn = null;
   }
 
-  /** Advance the camera-side animations by `dt` simulated seconds. */
+  /**
+   * Advance the camera-side animations by `dt` simulated seconds. Pausing freezes the
+   * teleport beat and the finish sequence like everything else in the maze; the short
+   * flash / fade overlays and a flip already in flight are allowed to complete.
+   */
   function advanceAnimations(dt) {
-    if (teleportCountdown >= 0 && (teleportCountdown -= dt) <= 0) {
-      teleportCountdown = -1;
-      doTeleport();
+    const sim = config.movement.paused ? 0 : dt;
+    if (sim > 0) {
+      if (teleportCountdown >= 0 && (teleportCountdown -= sim) <= 0) {
+        teleportCountdown = -1;
+        doTeleport();
+      }
+      if (finishCountdown >= 0 && (finishCountdown -= sim) <= 0) {
+        finishCountdown = -1;
+        transition = createFinishTransition(config.objects.finish.transition, config.objects.finish.duration);
+      }
+      if (transition && transition.update(sim)) completeFinish();
     }
-    if (finishCountdown >= 0 && (finishCountdown -= dt) <= 0) {
-      finishCountdown = -1;
-      transition = createFinishTransition(config.objects.finish.transition, config.objects.finish.duration);
-    }
-    if (transition && transition.update(dt)) completeFinish();
     if (flash && flash.update(dt)) flash = null;
     if (fadeIn && fadeIn.update(dt)) fadeIn = null;
     roll.update(dt);
@@ -454,12 +479,14 @@ export function createApp(canvas) {
     const pose = config.timing.interpolate ? walker.interpolatedPose(alpha) : walker.pose;
     const off = transition ? transition.cameraOffset : ZERO_OFFSET;
     const cellSize = config.maze.cellSize;
-    rig.position.set(pose.x, C.height + pose.bob - off.drop * cellSize, pose.z);
+    rig.position.set(pose.x, eyeHeight(config) + pose.bob - off.drop * cellSize, pose.z);
     rig.rotation.y = pose.yaw + off.yaw;
     tilt.rotation.x = C.pitch * DEG + off.pitch;
     camera.rotation.z = roll.roll + off.roll;
     camera.position.z = -off.dolly * cellSize;
-    const fov = C.fov * off.fovScale;
+    // The configured FOV spans the longer screen axis, so portrait screens keep a wide view.
+    const scaledFov = C.fov * off.fovScale;
+    const fov = camera.aspect < 1 ? verticalFovForHorizontal(scaledFov, camera.aspect) : scaledFov;
     if (camera.fov !== fov || camera.near !== C.near || camera.far !== C.far) {
       camera.fov = fov;
       camera.near = C.near;
@@ -519,7 +546,10 @@ export function createApp(canvas) {
   function render(alpha, dt) {
     clock += dt;
     advanceAnimations(dt);
-    if (!config.movement.paused) for (const rat of rats) rat.update(dt);
+    for (const rat of rats) {
+      rat.sync(); // colour / size / lighting mode follow the GUI even while paused
+      if (!config.movement.paused) rat.advance(dt);
+    }
     decorationLayer.update(dt, clock);
     applyCamera(alpha);
     updateOverlay();
@@ -664,9 +694,7 @@ export function createApp(canvas) {
         hud.showToast(`Unknown preset "${id}"`);
         return;
       }
-      resetConfig({ seed: config.maze.seed });
-      deepMerge(config, preset);
-      applyAll();
+      replaceConfig(createConfig(preset), { seed: config.maze.seed });
       hud.showToast(`Preset: ${labelOf(ENUMS.presets, id)}`);
     },
     exportSettings() {
@@ -678,9 +706,7 @@ export function createApp(canvas) {
       if (!file) return;
       try {
         const diff = parseSettingsJson(await file.text());
-        resetConfig();
-        deepMerge(config, diff);
-        applyAll();
+        replaceConfig(createConfig(diff));
         hud.showToast(`Settings imported from ${file.name}`);
       } catch (err) {
         hud.showToast(`Import failed: ${err?.message ?? err}`);
@@ -738,8 +764,7 @@ export function createApp(canvas) {
     if (e.ctrlKey || e.metaKey || e.altKey || isTypingTarget(e.target)) return;
     activity.noteInput();
     if (screensaverActive) {
-      exitScreensaver({ fromInput: true });
-      e.preventDefault();
+      exitScreensaver({ fromInput: true }); // any key wakes the screensaver; the key itself still works
       return;
     }
     // Space/Enter on a focused button already activate it; do not double up.
@@ -755,16 +780,15 @@ export function createApp(canvas) {
     if (e.repeat) return; // holding a key down must not re-toggle a shortcut
     switch (key) {
       case 'h': toggleGui(); break;
-      case 'Tab': toggleHud(); break;
+      case 'Tab':
+        // Keep Tab for keyboard navigation once focus is inside the settings window.
+        if (document.activeElement && document.activeElement !== document.body && document.activeElement !== canvas) return;
+        toggleHud();
+        break;
       case 'f': actions.fullscreen(); break;
       case ' ': actions.togglePause(); break;
       case 'r': actions.regenerate(); break;
-      case 'n':
-        config.maze.seed = randomSeedString();
-        rebuildWorld();
-        gui.refresh();
-        saveSoon();
-        break;
+      case 'n': actions.randomizeSeed(); gui.refresh(); break;
       case 'm': setManual(!config.movement.manual); gui.refresh(); saveSoon(); break;
       case 't': actions.teleportRandom(); break;
       case 'u': actions.flipView(); break;
@@ -802,6 +826,11 @@ export function createApp(canvas) {
   rebuildWorld();
   loadCustomImages();
   applyUiVisibility();
+  if (fromHash) {
+    // The share link booted successfully: it becomes this browser's state and leaves the address bar.
+    if (config.screensaver.persistSettings) storeSettings(config);
+    replaceUrl(location.pathname + location.search);
+  }
 
   const app = {
     config,

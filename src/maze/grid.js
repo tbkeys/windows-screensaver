@@ -14,7 +14,6 @@ export const DIRS = Object.freeze([
 ]);
 export const OPPOSITE = Object.freeze([2, 3, 0, 1]);
 export const WALL_BITS = Object.freeze([1, 2, 4, 8]);
-export const DIR_NAMES = Object.freeze(['N', 'E', 'S', 'W']);
 
 export const turnLeft = (h) => (h + 3) & 3;
 export const turnRight = (h) => (h + 1) & 3;
@@ -35,7 +34,12 @@ export class Maze {
   index(x, y) { return y * this.width + x; }
   inBounds(x, y) { return x >= 0 && y >= 0 && x < this.width && y < this.height; }
   hasWall(x, y, dir) { return (this.cells[this.index(x, y)] & WALL_BITS[dir]) !== 0; }
-  walls(x, y) { return this.cells[this.index(x, y)]; }
+
+  /** True when you can walk from (x, y) in `dir`: no wall and the neighbour is inside the maze. */
+  canStep(x, y, dir) {
+    const d = DIRS[dir];
+    return !this.hasWall(x, y, dir) && this.inBounds(x + d.dx, y + d.dy);
+  }
 
   neighbor(x, y, dir) {
     const nx = x + DIRS[dir].dx, ny = y + DIRS[dir].dy;
@@ -64,7 +68,7 @@ export class Maze {
   /** Directions you can walk from (x, y): no wall and in bounds. */
   openDirs(x, y) {
     const out = [];
-    for (let d = 0; d < 4; d++) if (!this.hasWall(x, y, d) && this.neighbor(x, y, d)) out.push(d);
+    for (let d = 0; d < 4; d++) if (this.canStep(x, y, d)) out.push(d);
     return out;
   }
 

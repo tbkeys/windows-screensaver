@@ -67,9 +67,6 @@ const stepIndex = (maze, i, d) => i + DIRS[d].dy * maze.width + DIRS[d].dx;
 
 const cellOf = (maze, i) => ({ x: i % maze.width, y: (i / maze.width) | 0 });
 
-/** True when (x, y) has no wall in `d` and the neighbour is inside the maze. */
-const canStep = (maze, x, y, d) => !maze.hasWall(x, y, d) && maze.inBounds(x + DIRS[d].dx, y + DIRS[d].dy);
-
 /**
  * Write into `out` the directions from (x, y) whose neighbour is in bounds and, when
  * `marks` is given, has `marks[index] === wanted`. Returns how many were written.
@@ -463,7 +460,7 @@ function createLocalDistances(maze) {
         if (steps > radius) break;
         const x = i % maze.width, y = (i / maze.width) | 0;
         for (let d = 0; d < 4; d++) {
-          if (!canStep(maze, x, y, d)) continue;
+          if (!maze.canStep(x, y, d)) continue;
           const j = stepIndex(maze, i, d);
           if (stamp[j] === generation) continue;
           stamp[j] = generation;

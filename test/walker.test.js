@@ -11,7 +11,7 @@ const sameHeadingYaw = (yaw, heading) => close(normalizeAngle(yaw - yawForHeadin
 
 /** Fresh movement config; pauses off unless a test turns them on. */
 const movement = (overrides = {}) => ({
-  ...deepClone(DEFAULTS.movement), pauseAtDeadEnd: 0, stepDuration: 0.5, turnDuration: 0.5, ...overrides,
+  ...deepClone(DEFAULTS.movement), pauseAtDeadEnd: 0, pauseAtStart: 0, stepDuration: 0.5, turnDuration: 0.5, ...overrides,
 });
 
 /** 3×1 corridor (0,0)–(1,0)–(2,0); start (0,0) facing E; finish (2,0). */
@@ -243,6 +243,17 @@ describe('pauses', () => {
     assert.equal(log[0][0], 'turnStart');
     ticksUntil(w, 0.1, () => w.state !== 'turning');
     assert.equal(w.heading, E);
+  });
+
+  test('pauseAtStart dwells on the START sign after setMaze but not after a teleport', () => {
+    const w = new Walker({ maze: corridor(), navigator: scripted(['forward']), movement: movement({ pauseAtStart: 0.3 }) });
+    assert.equal(w.state, 'waiting');
+    const n = ticksUntil(w, 0.1, () => w.state === 'stepping');
+    assert.equal(n, 3);
+    w.teleport({ x: 0, y: 0 }, E);
+    assert.equal(w.state, 'idle');
+    w.setMaze(corridor());
+    assert.equal(w.state, 'waiting');
   });
 
   test('pauseAtDeadEnd does not apply to ordinary back turns', () => {

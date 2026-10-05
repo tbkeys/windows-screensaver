@@ -3,11 +3,10 @@
 // upload, downloads, the no-WebGL dialog and dispose(). Needs a built dist/.
 // usage: node scripts/dev/verify-app.mjs
 import { spawn } from 'node:child_process';
-import { chromium } from 'playwright';
+import { launchChromium } from '../lib/chromium.mjs';
 
 const PORT = 4174;
 const URL = `http://localhost:${PORT}/`;
-const ARGS = ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'];
 const problems = [];
 const check = (ok, what) => { console.log(`${ok ? 'ok  ' : 'FAIL'} ${what}`); if (!ok) problems.push(what); };
 
@@ -15,7 +14,7 @@ const preview = spawn('npx', ['vite', 'preview', '--port', String(PORT), '--stri
 process.on('exit', () => { try { process.kill(-preview.pid, 'SIGTERM'); } catch { /* gone */ } });
 for (let i = 0; i < 80; i++) { try { if ((await fetch(URL)).ok) break; } catch { /* wait */ } await new Promise((r) => setTimeout(r, 250)); }
 
-const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium', args: ARGS });
+const browser = await launchChromium();
 const page = await browser.newPage({ viewport: { width: 960, height: 640 } });
 page.on('console', (m) => { if (m.type() === 'error' || m.type() === 'warning') { console.log(`[console.${m.type()}] ${m.text()}`); problems.push(m.text()); } });
 page.on('pageerror', (e) => { console.log('[pageerror]', e.message); problems.push(e.message); });
@@ -152,7 +151,7 @@ check(mem.geometries === 0 && mem.textures === 0 && !mem.maze && mem.ui === 0, `
 await browser.close();
 
 /* ---- no WebGL → message box ---- */
-const noGl = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium', args: [...ARGS, '--disable-webgl', '--disable-3d-apis'] });
+const noGl = await launchChromium({ args: ['--disable-webgl', '--disable-3d-apis'] });
 const page2 = await noGl.newPage({ viewport: { width: 960, height: 640 } });
 const errors = [];
 page2.on('pageerror', (e) => errors.push(e.message));

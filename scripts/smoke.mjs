@@ -4,8 +4,9 @@
 // console warning or page error. Screenshots land in scripts/out/smoke-*.png.
 // usage: npx vite build && node scripts/smoke.mjs
 import { spawn } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { mkdir } from 'node:fs/promises';
-import { chromium } from 'playwright';
+import { launchChromium } from './lib/chromium.mjs';
 
 const PORT = 4173;
 const URL = `http://localhost:${PORT}/`;
@@ -13,9 +14,20 @@ const OUT = 'scripts/out';
 const problems = [];
 const log = (...args) => console.log(...args);
 
-const preview = spawn('npx', ['vite', 'preview', '--port', String(PORT), '--strictPort'], { stdio: 'ignore', detached: true });
-const killPreview = () => { try { process.kill(-preview.pid, 'SIGTERM'); } catch { /* already gone */ } };
+if (!existsSync('dist/index.html')) {
+  console.error('dist/index.html not found – run `npx vite build` first');
+  process.exit(2);
+}
+
+const windows = process.platform === 'win32';
+const preview = spawn('npx', ['vite', 'preview', '--port', String(PORT), '--strictPort'], {
+  stdio: 'ignore', detached: !windows, shell: windows,
+});
+const killPreview = () => {
+  try { if (windows) preview.kill(); else process.kill(-preview.pid, 'SIGTERM'); } catch { /* already gone */ }
+};
 process.on('exit', killPreview);
+for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => { killPreview(); process.exit(130); });
 
 async function waitForServer(timeoutMs = 20000) {
   const deadline = Date.now() + timeoutMs;
@@ -26,17 +38,16 @@ async function waitForServer(timeoutMs = 20000) {
   throw new Error(`vite preview did not listen on ${PORT}`);
 }
 
-const browser = await chromium.launch({
-  executablePath: '/opt/pw-browsers/chromium',
-  args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'],
-});
-const page = await browser.newPage({ viewport: { width: 1280, height: 800 }, deviceScaleFactor: 1 });
-page.on('console', (m) => {
-  const line = `[console.${m.type()}] ${m.text()}`;
-  log(line);
-  if (m.type() === 'error' || m.type() === 'warning') problems.push(line);
-});
-page.on('pageerror', (e) => { log('[pageerror]', e.message); problems.push(`pageerror: ${e.message}`); });
+let browser = null;
+let page = null;
+const watchPage = () => {
+  page.on('console', (m) => {
+    const line = `[console.${m.type()}] ${m.text()}`;
+    log(line);
+    if (m.type() === 'error' || m.type() === 'warning') problems.push(line);
+  });
+  page.on('pageerror', (e) => { log('[pageerror]', e.message); problems.push(`pageerror: ${e.message}`); });
+};
 
 const step = async (name, fn) => {
   log(`▸ ${name}`);
@@ -54,6 +65,9 @@ const pressAll = async (keys) => { for (const k of keys) await page.keyboard.pre
 try {
   await mkdir(OUT, { recursive: true });
   await waitForServer();
+  browser = await launchChromium();
+  page = await browser.newPage({ viewport: { width: 1280, height: 800 }, deviceScaleFactor: 1 });
+  watchPage();
 
   await step('load + walker makes 3 steps', async () => {
     await page.goto(URL);
@@ -132,7 +146,7 @@ try {
 } catch (e) {
   problems.push(`fatal: ${e.message}`);
 } finally {
-  await browser.close();
+  await browser?.close();
   killPreview();
 }
 

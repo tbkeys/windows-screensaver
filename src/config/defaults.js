@@ -149,6 +149,7 @@ export const DEFAULTS = {
     finishPlacement: 'farthest',
     cellSize: 1.0,
     wallHeight: 1.0,
+    ceiling: true, // false = open sky (the background colour shows through)
     autoRegenerate: true, // rebuild immediately when a maze setting changes
   },
 
@@ -161,6 +162,7 @@ export const DEFAULTS = {
     pauseBeforeTurn: 0.0,
     pauseAfterTurn: 0.0,
     pauseAtDeadEnd: 0.15,
+    pauseAtStart: 1.0, // seconds spent facing the START sign before the first turn
     quantize: 0, // 0 = off, N = snap eased progress to N sub-steps (chunky original feel)
     headBob: 0.0,
     headBobSpeed: 2.0,
@@ -169,8 +171,8 @@ export const DEFAULTS = {
   },
 
   camera: {
-    fov: 70, // vertical degrees
-    height: 0.5, // eye height in world units (wallHeight * 0.5 is the classic look)
+    fov: 70, // degrees, applied to the longer screen axis (vertical in landscape)
+    height: 0.5, // eye height as a fraction of wallHeight (0.5 = the classic look)
     pitch: 0, // degrees
     near: 0.05,
     far: 100,
@@ -216,7 +218,7 @@ export const DEFAULTS = {
     headlampIntensity: 2.0,
     headlampDistance: 7,
     headlampDecay: 1.5,
-    faceShading: 0.0, // 0..1 darkens E/W-facing walls relative to N/S (fake directional light)
+    faceShading: 0.0, // 0..1 fake light from the north: N faces full, S faces −½, E/W faces −1 × this
     floorShade: 1.0,
     ceilingShade: 1.0,
     fogEnabled: false,
@@ -303,9 +305,124 @@ export const DEFAULTS = {
   },
 };
 
+/**
+ * Numeric limits `[min, max, step]` per path. The GUI builds its sliders from this table and
+ * `sanitizeConfig` clamps values that arrive from storage, share URLs or imports to it, so
+ * a hand-edited link cannot produce a NaN projection, a 0-sized cell or a million rats.
+ */
+export const RANGES = {
+  'maze.width': [2, 80, 1],
+  'maze.height': [2, 80, 1],
+  'maze.braid': [0, 1, 0.01],
+  'maze.growingTreeMix': [0, 1, 0.01],
+  'maze.roomChance': [0, 1, 0.01],
+  'maze.cellSize': [0.25, 4, 0.05],
+  'maze.wallHeight': [0.25, 4, 0.05],
+
+  'movement.stepDuration': [0.05, 3, 0.01],
+  'movement.turnDuration': [0.05, 3, 0.01],
+  'movement.pauseBeforeTurn': [0, 3, 0.05],
+  'movement.pauseAfterTurn': [0, 3, 0.05],
+  'movement.pauseAtDeadEnd': [0, 3, 0.05],
+  'movement.pauseAtStart': [0, 5, 0.05],
+  'movement.quantize': [0, 32, 1],
+  'movement.headBob': [0, 0.2, 0.005],
+  'movement.headBobSpeed': [0, 10, 0.1],
+
+  'camera.fov': [30, 140, 1],
+  'camera.height': [0.05, 0.95, 0.01],
+  'camera.pitch': [-45, 45, 1],
+  'camera.near': [0.01, 1, 0.01],
+  'camera.far': [10, 500, 1],
+  'camera.renderScale': [0.1, 2, 0.05],
+
+  'timing.fpsCap': [0, 240, 1],
+  'timing.tickRate': [5, 240, 1],
+  'timing.timeScale': [0, 4, 0.05],
+
+  'textures.anisotropy': [1, 16, 1],
+  'textures.textureSeed': [0, 1e9, 1],
+
+  'lighting.ambientIntensity': [0, 3, 0.01],
+  'lighting.hemisphereIntensity': [0, 3, 0.01],
+  'lighting.sunIntensity': [0, 3, 0.01],
+  'lighting.sunElevation': [0, 90, 1],
+  'lighting.sunAzimuth': [0, 360, 1],
+  'lighting.headlampIntensity': [0, 10, 0.1],
+  'lighting.headlampDistance': [0, 30, 0.1],
+  'lighting.headlampDecay': [0, 4, 0.05],
+  'lighting.faceShading': [0, 1, 0.01],
+  'lighting.floorShade': [0, 1, 0.01],
+  'lighting.ceilingShade': [0, 1, 0.01],
+  'lighting.fogNear': [0, 50, 0.1],
+  'lighting.fogFar': [0.5, 100, 0.5],
+  'lighting.fogDensity': [0, 0.5, 0.005],
+
+  'objects.polyhedra.count': [0, 40, 1],
+  'objects.polyhedra.size': [0.05, 0.9, 0.01],
+  'objects.polyhedra.spinSpeed': [0, 5, 0.05],
+  'objects.polyhedra.bob': [0, 0.3, 0.005],
+  'objects.smiley.count': [0, 40, 1],
+  'objects.smiley.size': [0.05, 0.9, 0.01],
+  'objects.smiley.spinSpeed': [0, 5, 0.05],
+  'objects.smiley.bob': [0, 0.3, 0.005],
+  'objects.smiley.flipDuration': [0.1, 5, 0.05],
+  'objects.rat.count': [0, 40, 1],
+  'objects.rat.speed': [0.1, 10, 0.1],
+  'objects.rat.size': [0.1, 3, 0.05],
+  'objects.posters.randomCount': [0, 40, 1],
+  'objects.posters.size': [0.05, 0.9, 0.01],
+  'objects.posters.elevation': [0.05, 0.95, 0.01],
+  'objects.finish.duration': [0, 6, 0.05],
+  'objects.finish.pauseBefore': [0, 3, 0.05],
+
+  'effects.ditherStrength': [0, 2, 0.01],
+  'effects.scanlines': [0, 1, 0.01],
+  'effects.scanlineDensity': [0.25, 4, 0.05],
+  'effects.vignette': [0, 1, 0.01],
+  'effects.curvature': [0, 1, 0.01],
+  'effects.pixelate': [1, 16, 1],
+  'effects.brightness': [0, 2, 0.01],
+  'effects.contrast': [0, 2, 0.01],
+  'effects.saturation': [0, 2, 0.01],
+  'effects.gamma': [0.5, 2.5, 0.01],
+  'effects.noise': [0, 1, 0.01],
+
+  'screensaver.hideCursorAfter': [0, 60, 0.5],
+  'screensaver.idleStart': [0, 600, 5],
+};
+
+/** Paths whose value must be an id from the named ENUMS list (dropdowns + validation). */
+export const ENUM_FIELDS = {
+  'maze.algorithm': 'mazeAlgorithms',
+  'maze.startPlacement': 'startPlacements',
+  'maze.finishPlacement': 'finishPlacements',
+  'movement.strategy': 'strategies',
+  'movement.stepEasing': 'easings',
+  'movement.turnEasing': 'easings',
+  'camera.aspectMode': 'aspectModes',
+  'textures.wall.kind': 'surfaceTextures',
+  'textures.floor.kind': 'surfaceTextures',
+  'textures.ceiling.kind': 'surfaceTextures',
+  'textures.poster.kind': 'posterTextures',
+  'textures.filtering': 'filtering',
+  'textures.resolution': 'textureResolutions',
+  'lighting.mode': 'lightingModes',
+  'lighting.fogType': 'fogTypes',
+  'objects.polyhedra.shape': 'polyhedronShapes',
+  'objects.polyhedra.placement': 'placements',
+  'objects.smiley.placement': 'placements',
+  'objects.rat.strategy': 'strategies',
+  'objects.finish.transition': 'finishTransitions',
+  'effects.colorDepth': 'colorDepths',
+};
+
+/** Ids of an ENUMS list (entries are `[id, label]` pairs or plain values). */
+export const enumIds = (enumName) => ENUMS[enumName].map((e) => (Array.isArray(e) ? e[0] : e));
+
 /* ---------- helpers ---------- */
 
-const isPlainObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
+export const isPlainObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
 
 export function deepClone(obj) {
   if (Array.isArray(obj)) return obj.map(deepClone);
@@ -317,15 +434,26 @@ export function deepClone(obj) {
   return obj;
 }
 
-/** Recursively copy `partial` onto `target` (mutating). Unknown keys are ignored. */
+const hasOwn = (obj, key) => Object.prototype.hasOwnProperty.call(obj, key);
+/** Keys that must never be merged from untrusted JSON (prototype pollution). */
+const UNSAFE_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+
+/**
+ * Recursively copy `partial` onto `target` (mutating). Keys that `target` does not own are
+ * ignored, a sub-tree is never replaced by a scalar (or vice versa), and prototype keys are
+ * skipped, so JSON from storage, a share URL or an import cannot corrupt the config shape.
+ */
 export function deepMerge(target, partial) {
   if (!isPlainObject(partial)) return target;
   for (const k of Object.keys(partial)) {
-    if (!(k in target)) continue;
+    if (UNSAFE_KEYS.has(k) || !hasOwn(target, k)) continue;
     const t = target[k];
     const p = partial[k];
-    if (isPlainObject(t) && isPlainObject(p)) deepMerge(t, p);
-    else if (p !== undefined) target[k] = Array.isArray(p) ? p.slice() : p;
+    if (isPlainObject(t)) {
+      if (isPlainObject(p)) deepMerge(t, p);
+    } else if (p !== undefined && !isPlainObject(p)) {
+      target[k] = Array.isArray(p) ? p.slice() : p;
+    }
   }
   return target;
 }

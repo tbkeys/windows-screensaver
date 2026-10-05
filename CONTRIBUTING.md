@@ -8,12 +8,14 @@ the notes below are everything you need to fit in.
 ```sh
 npm install
 npm run dev        # http://localhost:5173
-npm test           # node --test over test/*.test.js (pure modules, no browser)
+npm test           # node --test over test/*.test.js (pure modules + three.js geometry, no browser)
 npm run build      # dist/
 npm run smoke      # headless Chromium against dist/, fails on console errors
 ```
 
-Node 22+ is required. There is no lint step; match the style of the surrounding file.
+Node 22 (or 20.19+) is required. `npm run smoke` needs a Chromium: run
+`npx playwright install chromium` once, or point `CHROMIUM_PATH` at a browser binary.
+There is no lint step; match the style of the surrounding file.
 
 ## Ground rules
 
@@ -25,9 +27,11 @@ Node 22+ is required. There is no lint step; match the style of the surrounding 
   `lil-gui` are the whole runtime; the built site must keep working as static files
   with zero network calls.
 * **One config object.** Every tweakable lives in `src/config/defaults.js`. The GUI is
-  generated from `DEFAULTS`, so a new leaf shows up automatically; add a range or
-  dropdown for it in `SPECS` in `src/ui/gui.js`, and map its dotted path to an action in
-  `src/app.js` if changing it needs a rebuild. Read config values live rather than
+  generated from `DEFAULTS`, so a new leaf shows up automatically; give a number its
+  `[min, max, step]` in `RANGES` and a dropdown its list in `ENUM_FIELDS` (both in
+  `defaults.js` – the GUI and the settings sanitiser read them), add colour pickers to
+  `SPECS` in `src/ui/gui.js`, and map the dotted path to an action in `src/app.js` if
+  changing it needs a rebuild. Read config values live rather than
   caching them, unless the architecture says the thing is rebuilt on change.
 * **Deterministic randomness.** Anything random goes through `createRng(seed)` or a
   labelled `rng.fork()`. The same seed must produce the same maze, decorations and
@@ -47,13 +51,14 @@ Node 22+ is required. There is no lint step; match the style of the surrounding 
 | a texture kind | `ENUMS.surfaceTextures` or `posterTextures`, a painter in `src/render/textures.js` (must tile seamlessly; `scripts/dev/check-textures.mjs` measures the seam) |
 | a finish transition | `ENUMS.finishTransitions`, a kind in `src/sim/transitions.js` |
 | a preset | `ENUMS.presets` and `src/config/presets.js` (partial config merged over defaults) |
-| a post effect | a uniform + shader branch in `src/render/post.js`, a leaf under `effects` in `defaults.js` |
+| a post effect | a uniform + shader branch in `src/render/post.js` (and a clause in `effectsActive()`, or the pass is skipped when it is the only effect on), a leaf under `effects` in `defaults.js` |
 
 ## Pull requests
 
 * Keep them focused; one feature or fix per PR.
-* `npm test` and `npm run smoke` must pass. Add or extend a `test/*.test.js` for pure
-  logic; for anything visual, attach a screenshot (the pages under `scripts/dev/` are
-  the quickest way to isolate a module).
+* `npm test` and `npm run smoke` must pass. Add or extend a `test/*.test.js` for logic
+  (the maze mesh, decorations and frame loop have Node tests too); for anything visual,
+  attach a screenshot (the pages under `scripts/dev/` are the quickest way to isolate a
+  module).
 * Describe how the change relates to the 1995 original: is it restoring authentic
   behaviour, or an optional modern extra? Extras must default to the classic look.

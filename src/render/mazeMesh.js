@@ -258,8 +258,12 @@ export function buildMazeGroup(maze, config, materials, decorations = {}) {
   const wallData = buildWallGeometry(maze, cellSize, wallHeight, shading);
   const walls = staticMesh(wallData.geometry, materials.wall, 'walls');
   const floor = staticMesh(buildSurfaceGeometry(maze, cellSize, 0, true), materials.floor, 'floor');
-  const ceiling = staticMesh(buildSurfaceGeometry(maze, cellSize, wallHeight, false), materials.ceiling, 'ceiling');
-  group.add(walls, floor, ceiling);
+  // `maze.ceiling === false` leaves the maze open to the sky (the scene background shows).
+  const ceiling = config.maze.ceiling === false
+    ? null
+    : staticMesh(buildSurfaceGeometry(maze, cellSize, wallHeight, false), materials.ceiling, 'ceiling');
+  group.add(walls, floor);
+  if (ceiling) group.add(ceiling);
 
   /** @type {Map<string, THREE.Mesh>} */
   const posterMeshes = new Map();
@@ -277,7 +281,7 @@ export function buildMazeGroup(maze, config, materials, decorations = {}) {
     refreshMaterials() {
       walls.material = materials.wall;
       floor.material = materials.floor;
-      ceiling.material = materials.ceiling;
+      if (ceiling) ceiling.material = materials.ceiling;
       for (const [kind, mesh] of posterMeshes) mesh.material = materials.poster(kind);
     },
     setFaceShading(value) {

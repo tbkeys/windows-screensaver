@@ -10,6 +10,13 @@
 import * as THREE from 'three';
 
 const DEG = Math.PI / 180;
+/**
+ * three.js (≥ r155) lights are physically based: a Lambert surface under ambient/sun
+ * intensity 1 reflects only 1/π. The config promises "1 = as bright as classic mode", so
+ * the diffuse-sky lights are scaled by π here. The headlamp is a PointLight in candela
+ * and keeps its raw value (its falloff is what the sliders are tuned against).
+ */
+const DIFFUSE_SCALE = Math.PI;
 /** Headlamp sits a little below the eye so wall bases pick up more light than ceilings. */
 const HEADLAMP_OFFSET = Object.freeze({ x: 0, y: -0.08, z: 0 });
 
@@ -66,16 +73,16 @@ export function createLighting(scene, camera) {
     const L = config.lighting;
 
     ambient.color.set(L.ambientColor);
-    ambient.intensity = Math.max(0, L.ambientIntensity);
+    ambient.intensity = Math.max(0, L.ambientIntensity) * DIFFUSE_SCALE;
 
     hemisphere.visible = !!L.hemisphereEnabled;
     hemisphere.color.set(L.hemisphereSky);
     hemisphere.groundColor.set(L.hemisphereGround);
-    hemisphere.intensity = Math.max(0, L.hemisphereIntensity);
+    hemisphere.intensity = Math.max(0, L.hemisphereIntensity) * DIFFUSE_SCALE;
 
     sun.visible = !!L.sunEnabled;
     sun.color.set(L.sunColor);
-    sun.intensity = Math.max(0, L.sunIntensity);
+    sun.intensity = Math.max(0, L.sunIntensity) * DIFFUSE_SCALE;
     aimSun(L.sunElevation, L.sunAzimuth);
 
     headlamp.visible = !!L.headlampEnabled;

@@ -45,7 +45,7 @@ const KINDS = {
   },
 };
 
-/** Ids accepted by `createFinishTransition`, in `ENUMS.finishTransitions` order of usefulness. */
+/** Ids accepted by `createFinishTransition` (same set as `ENUMS.finishTransitions`, in definition order). */
 export const FINISH_TRANSITION_KINDS = Object.freeze(Object.keys(KINDS));
 
 const resetOffset = (o) => { o.yaw = 0; o.pitch = 0; o.roll = 0; o.dolly = 0; o.fovScale = 1; o.drop = 0; };

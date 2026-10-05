@@ -56,15 +56,16 @@ Nginx, Caddy, Docker or GitHub Pages.
 
 ## Quick start
 
-Requires Node 22+ and a browser with WebGL 2 (every current browser).
+Requires Node 22 (20.19+ also works) and a browser with WebGL 2 (every current browser).
 
 ```sh
 npm install
 npm run dev        # http://localhost:5173 with hot reload
 npm run build      # static site in dist/
 npm run preview    # serve dist/ locally on http://localhost:4173
-npm test           # unit tests (node --test; maze, rng, navigator, walker, easing)
+npm test           # unit tests (node --test): maze, rng, navigator, walker, loop, config sanitiser, maze mesh, decorations
 npm run smoke      # headless Chromium against dist/: fails on console errors, saves screenshots to scripts/out/
+                   # (needs a Chromium: `npx playwright install chromium` once, or set CHROMIUM_PATH)
 ```
 
 Press `H` to toggle the settings dialog, `Tab` for the status window, `F` for fullscreen.
@@ -86,7 +87,7 @@ file names are content-hashed) and `Cache-Control: no-cache` for `index.html`.
 
 ### Nginx
 
-With Docker (multi-stage build; nginx 1.27 serving on port 8080 as a non-root user,
+With Docker (multi-stage build; nginx 1.28 serving on port 8080 as a non-root user,
 gzip, immutable asset caching, security headers, health check at `/healthz`):
 
 ```sh
@@ -111,14 +112,14 @@ server {
         add_header Cache-Control "public, max-age=31536000, immutable";
         try_files $uri =404;
     }
-    location / {
+    location / {                   # no client-side routes: unknown paths are real 404s
         add_header Cache-Control "no-cache";
-        try_files $uri $uri/ /index.html;
+        try_files $uri $uri/ =404;
     }
 }
 ```
 
-To serve it below an existing site use `location /maze/ { alias /var/www/maze/; try_files $uri $uri/ /maze/index.html; }`.
+To serve it below an existing site use `location /maze/ { alias /var/www/maze/; try_files $uri $uri/ =404; }`.
 The complete hardened configuration (security headers, non-root, temp paths) is in
 [`deploy/nginx.conf`](deploy/nginx.conf).
 
@@ -165,10 +166,10 @@ If your default branch is not `main`, edit the `branches:` list in the workflow.
   the nginx/Caddy configs is the strictest one that works; if you embed the maze in an
   `<iframe>` on another site, relax `frame-ancestors`.
 * **Offline / `file://`.** After the first load the page makes no further requests and
-  keeps working offline. Opening `dist/index.html` straight from disk works in
-  Firefox; Chromium-based browsers refuse ES-module scripts on `file://` by default,
-  so use `npm run preview`, `npx serve dist`, or launch Chrome with
-  `--allow-file-access-from-files`.
+  keeps working offline. Opening `dist/index.html` straight from disk is not
+  supported: browsers block ES-module scripts on `file://`, so serve the folder with
+  `npm run preview`, `npx serve dist`, or any static server (or, for a one-off, launch
+  Chrome with `--allow-file-access-from-files`).
 
 ## Keyboard shortcuts
 
@@ -220,6 +221,7 @@ URLs and exported JSON.
 | `finishPlacement` | `farthest` | `farthest`, `deadEnd` (farthest dead end), `opposite` edge, `random` |
 | `cellSize` | 1 | World units per cell |
 | `wallHeight` | 1 | Wall height in world units |
+| `ceiling` | on | Draw the ceiling; off leaves the maze open to the sky (the background colour shows) |
 | `autoRegenerate` | on | Rebuild as soon as a maze setting changes |
 
 Buttons: **Randomize seed**, **Regenerate**.
@@ -234,17 +236,18 @@ Buttons: **Randomize seed**, **Regenerate**.
 | `stepEasing`, `turnEasing` | `linear` | `linear` (original), `smooth`, `easeInOut`, `easeOut`, `easeIn`, `snap` |
 | `pauseBeforeTurn`, `pauseAfterTurn` | 0 s | Extra waits around turns |
 | `pauseAtDeadEnd` | 0.15 s | Wait before the about-turn in a dead end |
+| `pauseAtStart` | 1 s | Dwell facing the START sign before the first decision (also after each new maze) |
 | `quantize` | 0 | Snap eased progress to N sub-steps per phase (chunky original feel at any FPS; 0 = off) |
 | `headBob`, `headBobSpeed` | 0, 2 | Vertical bob amplitude (world units) and rate while stepping |
-| `manual` | off | Drive with WASD / arrows instead of the navigator |
-| `paused` | off | Freeze the walker |
+| `manual` | off | Drive with WASD / arrows instead of the navigator (session state, never saved) |
+| `paused` | off | Freeze the walker, the rats and the finish sequence (session state, never saved) |
 
 ### Camera (`camera.*`)
 
 | Setting | Default | Description |
 | --- | --- | --- |
-| `fov` | 70° | Vertical field of view (30–140) |
-| `height` | 0.5 | Eye height in world units (half the wall height is the classic look) |
+| `fov` | 70° | Field of view (30–140) along the longer screen axis: vertical in landscape, horizontal in portrait |
+| `height` | 0.5 | Eye height as a fraction of `wallHeight` (0.5 = the classic look; polyhedra and smileys float at eye level) |
 | `pitch` | 0° | Look up / down (−45…45) |
 | `near`, `far` | 0.05, 100 | Clip planes |
 | `aspectMode` | `window` | Fill window, or letterbox to `4:3`, `5:4`, `16:9`, `16:10` |
@@ -272,14 +275,14 @@ Per slot — `wall`, `floor`, `ceiling`, `poster` (each its own sub-folder):
 | `offsetU`, `offsetV` | 0 | UV offset (−1…1) |
 | `tint` | `#ffffff` | Multiplied colour (also the colour of `solid`) |
 | `brightness` | 1 | Multiplier 0–3 |
-| `custom` | none | Uploaded image (buttons **Upload image…** / **Clear image**); the `custom` kind uses it |
+| `custom` | none | Uploaded image (buttons **Upload image…** / **Clear image**), kept at its own aspect ratio; the `custom` kind uses it |
 
 All surfaces:
 
 | Setting | Default | Description |
 | --- | --- | --- |
 | `filtering` | `smooth` | `smooth` (bilinear, original OpenGL look), `trilinear` (mipmaps), `pixelated` (nearest) |
-| `anisotropy` | 1 | Anisotropic filtering samples (1–16) |
+| `anisotropy` | 1 | Anisotropic filtering samples (1–16); it needs mipmaps, so values above 1 switch `smooth` to mipmapped filtering |
 | `resolution` | 256 | Procedural texture size: 64, 128, 256, 512 or 1024 px |
 | `textureSeed` | 0 | Perturbs procedural noise; 0 derives it from the maze seed |
 
@@ -288,11 +291,11 @@ All surfaces:
 | Setting | Default | Description |
 | --- | --- | --- |
 | `mode` | `classic` | `classic` = unlit, fullbright materials (lights have no effect); `lit` = Lambert shading |
-| `ambientColor`, `ambientIntensity` | `#ffffff`, 1 | Ambient light |
+| `ambientColor`, `ambientIntensity` | `#ffffff`, 1 | Ambient light (1 = as bright as classic mode; the same scale applies to the hemisphere and sun lights) |
 | `hemisphereEnabled`, `hemisphereSky`, `hemisphereGround`, `hemisphereIntensity` | off, `#bfd4ff`, `#3a2a1a`, 0.6 | Hemisphere light |
 | `sunEnabled`, `sunColor`, `sunIntensity`, `sunElevation`, `sunAzimuth` | off, `#ffffff`, 0.8, 60°, 30° | Directional light aimed by elevation / azimuth |
 | `headlampEnabled`, `headlampColor`, `headlampIntensity`, `headlampDistance`, `headlampDecay` | off, `#ffe9c4`, 2, 7, 1.5 | Point light carried by the camera |
-| `faceShading` | 0 | Darkens E/W-facing walls relative to N/S (fake directional light, works in classic mode) |
+| `faceShading` | 0 | Fake light from the north, works in classic mode too: N-facing walls stay full, S-facing lose ½× and E/W-facing 1× this value |
 | `floorShade`, `ceilingShade` | 1, 1 | Brightness multipliers for floor and ceiling |
 | `fogEnabled`, `fogType`, `fogColor` | off, `linear`, `#000000` | Scene fog, `linear` or `exp2` |
 | `fogNear`, `fogFar` | 3, 14 | Linear fog range (world units) |
@@ -347,7 +350,7 @@ straight to the canvas; otherwise it goes through one full-screen shader pass.
 | --- | --- | --- |
 | `showGui`, `showHud`, `showTaskbar` | on, on, on | Visibility of the settings dialog, status window and taskbar |
 | `hideCursorAfter` | 3 s | Hide the mouse cursor after this much inactivity (0 = never) |
-| `screensaverMode` | off | Hide all UI; any key or mouse input exits the mode |
+| `screensaverMode` | off | Hide all UI; any key, click, wheel turn or mouse movement over a few pixels exits the mode (session state, never saved) |
 | `idleStart` | 0 s | Enter screensaver mode after this much inactivity (0 = off) |
 | `exitFullscreenOnInput` | off | Also leave fullscreen when input exits screensaver mode |
 | `persistSettings` | on | Save settings that differ from the defaults to localStorage (`win95maze.settings.v1`) and restore them on load; uploaded images are stored too unless they exceed 700 KB, in which case they stay in memory for the session |
@@ -360,7 +363,7 @@ straight to the canvas; otherwise it goes through one full-screen shader pass.
 ├── vite.config.js              Vite build (base './', three and lil-gui split into their own chunks)
 ├── public/favicon.svg
 ├── src/
-│   ├── main.js                 Entry point: creates the config and boots app.js
+│   ├── main.js                 Entry point: boots app.js (retries with defaults if a saved config fails)
 │   ├── app.js                  Integration: renderer, camera rig, config-path → action table,
 │   │                           walker ↔ decoration wiring, shortcuts, screensaver mode
 │   ├── app/
@@ -458,8 +461,5 @@ If a machine still struggles:
 
 ## License
 
-The repository owner has not yet added a top-level `LICENSE` file; until one is
-present, the code in this repository is **all rights reserved** by default (the
-`"license": "MIT"` field in `package.json` states the intent). Repository owner: add
-a `LICENSE` file (MIT would match `package.json`) to make the terms explicit.
-Third-party notices are in [`LICENSE-THIRD-PARTY.md`](LICENSE-THIRD-PARTY.md).
+MIT – see [`LICENSE`](LICENSE). Third-party notices for three.js and lil-gui are in
+[`LICENSE-THIRD-PARTY.md`](LICENSE-THIRD-PARTY.md).

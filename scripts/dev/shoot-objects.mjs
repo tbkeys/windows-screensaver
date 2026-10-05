@@ -1,13 +1,10 @@
 // Headless screenshots of scripts/dev/objects.html → scripts/out/objects.png, objects-smiley.png, rat.png, objects-lit.png, objects-wire.png
 // usage: node scripts/dev/shoot-objects.mjs [port]
-import { chromium } from 'playwright';
+import { launchChromium } from '../lib/chromium.mjs';
 
 const port = process.argv[2] || '5191';
 const FILES = { corridor: 'objects.png', smiley: 'objects-smiley.png', rat: 'rat.png', lit: 'objects-lit.png', wire: 'objects-wire.png' };
-const browser = await chromium.launch({
-  executablePath: '/opt/pw-browsers/chromium',
-  args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'],
-});
+const browser = await launchChromium();
 const page = await browser.newPage({ viewport: { width: 980, height: 1000 }, deviceScaleFactor: 1 });
 const problems = [];
 page.on('console', (m) => {

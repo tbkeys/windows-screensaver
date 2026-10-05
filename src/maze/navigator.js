@@ -40,9 +40,6 @@ export function createNavigator(strategyId, maze, rng = createRng(randomSeedStri
 
 /* ------------------------------------------------------------------ helpers */
 
-/** True when (x, y) has no wall in `d` and the neighbour is inside the maze. */
-const canGo = (maze, x, y, d) => !maze.hasWall(x, y, d) && maze.inBounds(x + DIRS[d].dx, y + DIRS[d].dy);
-
 /** Action that makes a walker with `heading` face `dir` (or step, when already facing it). */
 function actionToFace(heading, dir) {
   if (dir === heading) return 'forward';
@@ -71,11 +68,11 @@ function randomPicker(maze, rng, avoidReverse) {
       const reverse = turnBack(heading);
       let n = 0;
       for (let d = 0; d < 4; d++) {
-        if ((avoidReverse && d === reverse) || !canGo(maze, cell.x, cell.y, d)) continue;
+        if ((avoidReverse && d === reverse) || !maze.canStep(cell.x, cell.y, d)) continue;
         options[n++] = d;
       }
       if (n > 0) return options[rng.int(n)];
-      return avoidReverse && canGo(maze, cell.x, cell.y, reverse) ? reverse : -1;
+      return avoidReverse && maze.canStep(cell.x, cell.y, reverse) ? reverse : -1;
     },
     reset() {},
   };
@@ -93,7 +90,7 @@ function explorerPicker(maze, rng) {
       const reverse = turnBack(heading);
       let n = 0, best = Infinity;
       for (let d = 0; d < 4; d++) {
-        if (!canGo(maze, cell.x, cell.y, d)) continue;
+        if (!maze.canStep(cell.x, cell.y, d)) continue;
         const score = visits[i + DIRS[d].dy * maze.width + DIRS[d].dx] * 2 + (d === reverse ? 1 : 0);
         if (score < best) { best = score; n = 0; }
         if (score === best) options[n++] = d;
@@ -141,7 +138,7 @@ function committedNavigator(maze, picker) {
   return {
     next(cell, heading) {
       const i = maze.index(cell.x, cell.y);
-      if (pendingCell !== i || pendingDir < 0 || !canGo(maze, cell.x, cell.y, pendingDir)) {
+      if (pendingCell !== i || pendingDir < 0 || !maze.canStep(cell.x, cell.y, pendingDir)) {
         pendingCell = i;
         pendingDir = picker.pick(cell, heading);
       }
@@ -170,10 +167,10 @@ function wallFollowerPicker(maze, side) {
   return {
     pick(cell, heading) {
       const { x, y } = cell;
-      if (canGo(maze, x, y, near(heading))) return near(heading);
-      if (canGo(maze, x, y, heading)) return heading;
-      if (canGo(maze, x, y, far(heading))) return far(heading);
-      return canGo(maze, x, y, turnBack(heading)) ? turnBack(heading) : -1;
+      if (maze.canStep(x, y, near(heading))) return near(heading);
+      if (maze.canStep(x, y, heading)) return heading;
+      if (maze.canStep(x, y, far(heading))) return far(heading);
+      return maze.canStep(x, y, turnBack(heading)) ? turnBack(heading) : -1;
     },
     reset() {},
   };

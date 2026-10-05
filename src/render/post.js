@@ -71,9 +71,17 @@ float hash(vec2 p) {
 
 // Quantise to the selected palette; d is the dither offset in units of one level step.
 vec3 quantise(vec3 c, int depth, float d) {
-  if (depth == 1 || depth == 2) {
-    vec3 steps = depth == 1 ? vec3(31.0, 63.0, 31.0) : vec3(7.0, 7.0, 3.0);
+  if (depth == 1) {
+    vec3 steps = vec3(31.0, 63.0, 31.0);
     return floor(c * steps + d + 0.5) / steps;
+  }
+  if (depth == 2) {
+    // 256 colours the way the Windows halftone palette did it: a 6x6x6 colour cube plus a
+    // grey ramp, so neutral greys stay neutral instead of snapping to tinted 3-3-2 levels.
+    float mx = max(c.r, max(c.g, c.b));
+    float mn = min(c.r, min(c.g, c.b));
+    if (mx - mn < 0.08) return vec3(floor(dot(c, LUMA) * 15.0 + d + 0.5) / 15.0);
+    return floor(c * 5.0 + d + 0.5) / 5.0;
   }
   if (depth == 3) {
     // 16 colours: each channel on/off, in a bright (1.0) or dark (0.5) variant.
@@ -106,6 +114,7 @@ void main() {
   col = mix(vec3(dot(col, LUMA)), col, uSaturation);
   col = pow(clamp(col, 0.0, 1.0), vec3(1.0 / uGamma));
 
+  // Centre the 4x4 Bayer threshold (mean 7.5/16 = 0.46875) so dithering does not shift brightness.
   float d = (bayer4(gl_FragCoord.xy) - 0.46875) * uDither;
   col = clamp(quantise(col, uColorDepth, d), 0.0, 1.0);
 

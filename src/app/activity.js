@@ -49,6 +49,7 @@ export function createActivityWatcher({ getHideCursorAfter, getIdleStart, onIdle
     noteInput();
     if (moved > EXIT_DISTANCE) inputWhileArmed();
   };
+  /** Clicks, taps and wheel turns count as deliberate input: they wake the screensaver at once. */
   const onPointerDown = () => {
     noteInput();
     inputWhileArmed();
@@ -57,7 +58,7 @@ export function createActivityWatcher({ getHideCursorAfter, getIdleStart, onIdle
   window.addEventListener('mousemove', onPointerMove, { passive: true });
   window.addEventListener('pointerdown', onPointerDown, { passive: true });
   window.addEventListener('touchstart', onPointerDown, { passive: true });
-  window.addEventListener('wheel', noteInput, { passive: true });
+  window.addEventListener('wheel', onPointerDown, { passive: true });
 
   const setCursorHidden = (hidden) => {
     if (hidden === cursorHidden) return;
@@ -91,7 +92,7 @@ export function createActivityWatcher({ getHideCursorAfter, getIdleStart, onIdle
       window.removeEventListener('mousemove', onPointerMove);
       window.removeEventListener('pointerdown', onPointerDown);
       window.removeEventListener('touchstart', onPointerDown);
-      window.removeEventListener('wheel', noteInput);
+      window.removeEventListener('wheel', onPointerDown);
       setCursorHidden(false);
     },
   };

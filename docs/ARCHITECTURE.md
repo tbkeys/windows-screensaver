@@ -25,15 +25,24 @@ These helpers live in `src/maze/grid.js` and are exported: `DIRS`, `OPPOSITE`,
 
 ## Config
 
-`src/config/defaults.js` exports `DEFAULTS` (deep-frozen template), `ENUMS`
+`src/config/defaults.js` exports `DEFAULTS` (the template), `ENUMS`
 (option lists for every dropdown), `createConfig()` (deep clone of defaults) and
 `deepMerge(target, partial)`. The whole app shares **one mutable config object**
 (the result of `createConfig()`), and lil-gui binds directly to its leaves. Nothing
 caches config values across frames unless the contract below says it is rebuilt on
 change – read `config.x.y` live.
 
-Change propagation: the GUI calls `onChange(path, value)` with a dotted path such as
-`'textures.wall.kind'`. `src/app.js` owns a table mapping path prefixes → actions
+It also exports `RANGES` (`path → [min, max, step]` for every numeric leaf) and
+`ENUM_FIELDS` (`path → ENUMS list name` for every dropdown). The GUI builds its sliders and
+dropdowns from these two tables and `sanitizeConfig()` (src/app/settings.js) clamps and
+validates every value that arrives from storage, a share URL or an import against them,
+so the two can never disagree. `deepMerge` ignores unknown and prototype keys and never
+swaps a sub-tree for a scalar. `SESSION_PATHS` (`movement.paused`, `movement.manual`,
+`screensaver.screensaverMode`) are session state: never persisted, shared or imported.
+
+Change propagation: the GUI calls `onChange(path, value, finished)` with a dotted path
+such as `'textures.wall.kind'`; `finished` is false while a slider or colour is still
+being dragged (app.js debounces expensive rebuilds until it is true). `src/app.js` owns a table mapping path prefixes → actions
 (rebuild maze, rebuild materials, update lighting, resize, …). Modules never import
 the GUI.
 
@@ -50,7 +59,7 @@ export function createRng(seed: string|number): Rng
 //   rng.shuffle(array)    in-place Fisher-Yates, returns array
 //   rng.chance(p)         boolean
 //   rng.fork(label)       new independent Rng derived from this seed + label
-export function randomSeedString(): string                  // e.g. 'maze-7f3a9c'
+export function randomSeedString(): string                  // e.g. 'dusty-modem-4f21'
 ```
 Implementation: sfc32 or mulberry32 – deterministic across browsers.
 
@@ -64,6 +73,7 @@ export class Maze {
   index(x, y) → number
   inBounds(x, y) → boolean
   hasWall(x, y, dir) → boolean
+  canStep(x, y, dir) → boolean      // no wall AND neighbour in bounds (the one walkability test)
   setWall(x, y, dir, present)      // keeps neighbour consistent
   carve(x, y, dir)                  // remove wall between (x,y) and neighbour
   openDirs(x, y) → number[]         // dirs with no wall AND in bounds
@@ -132,7 +142,8 @@ Behaviour: at a cell centre in `idle` the walker asks the navigator (or the manu
 queue when `movement.manual`) for an action. `left/right/back` ⇒ `turning` for
 `turnDuration` (× 2 for back) using `turnEasing`; `forward` ⇒ `stepping` for
 `stepDuration` using `stepEasing`. `pauseBeforeTurn`, `pauseAfterTurn`,
-`pauseAtDeadEnd` insert `waiting`. `quantize > 0` snaps the eased progress to
+`pauseAtDeadEnd` insert `waiting`; `pauseAtStart` makes `setMaze()` begin with a `waiting`
+dwell on the START sign (not after `teleport`). `quantize > 0` snaps the eased progress to
 `floor(p * quantize) / quantize` (reproduces chunky original motion even at high FPS).
 `headBob` adds `sin()` vertical offset while stepping. When `movement.paused` the
 walker does nothing. Entering `maze.finish` emits `finish` and sets `state='finished'`
@@ -140,7 +151,8 @@ until `setMaze` is called. The rat reuses this class with its own navigator.
 
 ### `src/sim/loop.js`
 ```js
-export function createLoop({ tick(dt), render(alpha, dt), getTickRate(), getFpsCap() }) → { start(), stop(), running }
+export function createLoop({ tick(dt), render(alpha, dt), getTickRate(), getFpsCap(), getTimeScale(), getFixedTimestep() })
+  → { start(), stop(), running, fps, frameTime }   // raf/caf/now/doc are injectable for tests
 ```
 Fixed-timestep accumulator for `tick` (clamps dt to 0.25 s to avoid spiral of death);
 `render` runs at most `fpsCap` times per second (`0` = uncapped / vsync), with
@@ -152,7 +164,12 @@ export const TEXTURE_KINDS: { id, name, slots: ('wall'|'floor'|'ceiling'|'poster
 export function createTexture(kind, { resolution, tint, brightness, seed, text }) → THREE.CanvasTexture
 export function applyFiltering(texture, filtering /* 'pixelated'|'smooth'|'trilinear' */, anisotropy)
 export function textureFromImage(imgOrDataUrl) → Promise<THREE.Texture>
-export class TextureCache { get(slotConfig, globalTexConfig) → THREE.Texture; dispose() }
+export class TextureCache {
+  constructor({ seed, maxBytes })            // LRU budget on unreferenced canvases
+  get(slotConfig, globalTexConfig, extra) → THREE.Texture        // cached base: kind/tint/brightness/custom × resolution/seed
+  getForSlot(slot, slotConfig, globalTexConfig) → THREE.Texture  // per-slot clone with repeat/offset + filtering applied
+  setSeed(seed); setCustomImage(slot, texture|null); loadCustomImage(slot, src); invalidate(slot?); dispose()
+}
 ```
 Kinds (all drawn procedurally on a canvas – no image files): `brick` (red brick with
 mortar; the Win95 default), `greyBrick`, `wood`, `stone`, `cobble`, `tile` (ceiling
@@ -177,7 +194,8 @@ export function buildMazeGroup(maze, config, materials, decorations) → { group
 ```
 Builds **one merged BufferGeometry** for all wall faces (both sides of each
 zero-thickness wall, UV `u` along the wall, `v` up, repeated by `textures.wall.repeatU/V`),
-one plane for the floor and one for the ceiling (repeat = width/height × repeat),
+one plane for the floor and one for the ceiling (omitted when `maze.ceiling` is false;
+repeat = width/height × repeat),
 and one merged geometry for posters (`decorations.posters`). Also draws the outer
 boundary. No per-wall meshes.
 
@@ -194,7 +212,15 @@ export class DecorationLayer {
   objectAt(x, y) → { type:'polyhedron'|'smiley', ... } | null
   dispose()
 }
-export class Rat { constructor(maze, config, rng); group; walker; update(dt); dispose() }
+export class Rat {
+  constructor(maze, config, rng); group; walker
+  sync()        // re-read live config (speed, strategy, colour, size, lighting mode) – every frame
+  advance(dt)   // move + animate – skipped while paused
+  update(dt)    // sync() + advance(dt)
+  dispose()
+}
+export function teleportTarget(maze, rng, exclude) → { x, y, heading }   // random cell facing an open side
+export const eyeHeight = (config) => config.camera.height * config.maze.wallHeight
 ```
 
 ### `src/render/lighting.js`
@@ -222,13 +248,16 @@ vignette and CRT barrel curvature.
 ### `src/sim/transitions.js`
 ```js
 export function createFinishTransition(kind, duration) → {
-  update(dt) → boolean /* done */, cameraOffset: { yaw, pitch, roll, dolly, fovScale }, overlayAlpha: number }
+  kind, progress, update(dt) → boolean /* done */,
+  cameraOffset: { yaw, pitch, roll, dolly, fovScale, drop }, overlayAlpha: number, color: string }
+export function createTeleportFlash(duration, color = '#ffffff') → { update(dt) → done, overlayAlpha, color }
+export function createRollAnimator() → { setTarget(roll, duration), toggle(duration), update(dt), roll }
 ```
 Kinds: `none`, `fade`, `spin`, `zoom`, `drop`, `swirl`.
 
 ### `src/ui/gui.js`
 ```js
-export function createGui(config, { onChange(path, value), actions, container }) → {
+export function createGui(config, { onChange(path, value, finished), actions, container }) → {
   gui /* lil-gui */, refresh(), show(), hide(), toggle(), setVisible(bool), destroy() }
 ```
 `actions`: `regenerate()`, `randomizeSeed()`, `uploadTexture(slot)`, `clearTexture(slot)`,
@@ -252,7 +281,12 @@ rebuild actions, wires walker events to decorations (teleport, flip, finish), ha
 keyboard shortcuts, resize/aspect/letterbox, settings persistence (localStorage +
 share URL), screensaver mode (hide UI/cursor, exit on input) and idle start.
 
-Camera rig: `rig` (Object3D, position + yaw) → `tilt` (pitch) → `camera` (roll).
+Camera rig: `rig` (Object3D, position + yaw) → `tilt` (pitch) → `camera` (roll). The eye
+sits at `camera.height × wallHeight`; `camera.fov` spans the longer screen axis (vertical
+in landscape, converted for portrait). Lighting intensities for ambient/hemisphere/sun are
+multiplied by π in lighting.js so that 1 means "as bright as classic mode" under three's
+physically based lights. `main.js` wraps `createApp` in a try/catch that clears saved
+settings and boots again with defaults if construction throws.
 
 ## Keyboard shortcuts
 `H` toggle settings, `Tab` toggle HUD, `F` fullscreen, `Space` pause, `R` regenerate,
@@ -260,7 +294,9 @@ Camera rig: `rig` (Object3D, position + yaw) → `tilt` (pitch) → `camera` (ro
 teleport, `U` flip view, `P` screenshot, `Esc` exit screensaver mode.
 
 ## Testing
-`npm test` runs `node --test` over `test/*.test.js` (pure modules only: rng, grid,
-generator, navigator, walker). `npm run smoke` launches headless Chromium via
-Playwright against a built `dist/`, fails on console errors, and saves screenshots to
+`npm test` runs `node --test` over `test/*.test.js` (no browser: rng, grid, generator,
+navigator, easing, walker, loop, config/sanitiser, maze mesh geometry, decorations;
+three.js runs fine in Node for the geometry checks). `npm run smoke` launches headless
+Chromium via Playwright (through `scripts/lib/chromium.mjs`; `CHROMIUM_PATH` overrides the
+browser) against a built `dist/`, fails on console errors, and saves screenshots to
 `scripts/out/`.

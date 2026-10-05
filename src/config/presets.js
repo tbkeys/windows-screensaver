@@ -1,6 +1,8 @@
 /**
  * Named presets. Each preset is a *partial* config merged over DEFAULTS by
  * `createConfig(preset)` / `deepMerge(config, preset)`. Ids must match ENUMS.presets.
+ *
+ * Light intensities are in "1 = as bright as classic mode" units (see lighting.js).
  */
 export const PRESETS = {
   classic95: {},
@@ -14,17 +16,17 @@ export const PRESETS = {
   },
 
   hedgeGarden: {
+    maze: { algorithm: 'kruskal', braid: 0.15, ceiling: false },
     textures: {
       wall: { kind: 'hedge', repeatU: 1, repeatV: 1 },
       floor: { kind: 'cobble' },
-      ceiling: { kind: 'solid', tint: '#8ec5ff' },
     },
     lighting: {
-      mode: 'lit', ambientIntensity: 0.55, sunEnabled: true, sunIntensity: 1.1,
-      sunElevation: 50, sunAzimuth: 40, hemisphereEnabled: true,
+      mode: 'lit', ambientColor: '#dfe8ff', ambientIntensity: 0.3,
+      sunEnabled: true, sunColor: '#fff4d6', sunIntensity: 0.6, sunElevation: 50, sunAzimuth: 40,
+      hemisphereEnabled: true, hemisphereSky: '#9fc9ff', hemisphereGround: '#4a5a30', hemisphereIntensity: 0.3,
       fogEnabled: true, fogType: 'exp2', fogColor: '#9fc9ff', fogDensity: 0.05, backgroundColor: '#9fc9ff',
     },
-    maze: { algorithm: 'kruskal', braid: 0.15 },
   },
 
   dungeon: {
@@ -34,7 +36,7 @@ export const PRESETS = {
       ceiling: { kind: 'plaster', tint: '#6b6b6b' },
     },
     lighting: {
-      mode: 'lit', ambientColor: '#1a1410', ambientIntensity: 0.35,
+      mode: 'lit', ambientColor: '#1a1410', ambientIntensity: 0.12,
       headlampEnabled: true, headlampColor: '#ffb35c', headlampIntensity: 3.0, headlampDistance: 6, headlampDecay: 1.8,
       fogEnabled: true, fogType: 'exp2', fogColor: '#050302', fogDensity: 0.16, backgroundColor: '#050302',
       faceShading: 0.25,
@@ -50,8 +52,8 @@ export const PRESETS = {
       ceiling: { kind: 'solid', tint: '#05020a' },
     },
     lighting: {
-      mode: 'lit', ambientColor: '#4020a0', ambientIntensity: 0.6,
-      headlampEnabled: true, headlampColor: '#00ffff', headlampIntensity: 2.5, headlampDistance: 9, headlampDecay: 1.2,
+      mode: 'lit', ambientColor: '#4020a0', ambientIntensity: 0.25,
+      headlampEnabled: true, headlampColor: '#f4e6ff', headlampIntensity: 2.5, headlampDistance: 9, headlampDecay: 1.2,
       fogEnabled: true, fogType: 'linear', fogColor: '#100020', fogNear: 2, fogFar: 10, backgroundColor: '#100020',
     },
     effects: { scanlines: 0.25, vignette: 0.35, curvature: 0.12 },
